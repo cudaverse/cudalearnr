@@ -1,0 +1,26 @@
+Package: cudalearnr
+Title: GPU-Aware Numerical Learning Algorithms for R
+Version: 0.1.0
+Authors@R:
+    person("Yaoxiang", "Li", email = "liyaoxiang@outlook.com",
+           role = c("aut", "cre"))
+Description: Provides experimental GPU-aware numerical algorithms for R,
+    including singular value decomposition, principal component analysis,
+    pairwise distances, nearest neighbours, and k-means clustering. Uses an
+    optional CUDA-enabled 'torch' backend and portable base R fallbacks with
+    explicit reporting of the backend used.
+License: MIT + file LICENSE
+URL: https://github.com/cudaverse/cudalearnr
+BugReports: https://github.com/cudaverse/cudalearnr/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Imports:
+    cudatensr,
+    stats
+Remotes:
+    cudaverse/cudatensr
+Suggests:
+    testthat (>= 3.0.0),
+    torch
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0
