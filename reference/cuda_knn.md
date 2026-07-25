@@ -41,7 +41,10 @@ cuda_knn(
 
 A `cuda_knn` list with `index` and `distance` matrices of size `nrow(x)`
 by `k`, followed by the selected `metric` and actual `device`.
-Neighbours in every row are ordered by distance and then row index.
+Neighbours in every row are ordered by distance and then row index. When
+`x` has row names, both matrices retain them as query identifiers;
+neighbour identities can be recovered with
+`rownames(result$index)[result$index]`.
 
 ## Details
 

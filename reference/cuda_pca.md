@@ -39,7 +39,9 @@ cuda_pca(
 ## Value
 
 A `cuda_pca` object with scores in `x`, loadings in `rotation`, standard
-deviations, centring/scaling values, and actual device.
+deviations, centring/scaling values, and actual device. Observation
+names, feature names, and stable `PC1`, `PC2`, ... component names are
+preserved on every backend.
 
 ## Examples
 

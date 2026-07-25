@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">cudalearnr</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -77,7 +77,10 @@ Larger batches may be faster but use more memory.</p></dd>
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A <code>cuda_knn</code> list with <code>index</code> and <code>distance</code> matrices of size
 <code>nrow(x)</code> by <code>k</code>, followed by the selected <code>metric</code> and actual <code>device</code>.
-Neighbours in every row are ordered by distance and then row index.</p>
+Neighbours in every row are ordered by distance and then row index.
+When <code>x</code> has row names, both matrices retain them as query identifiers;
+neighbour identities can be recovered with
+<code>rownames(result$index)[result$index]</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>

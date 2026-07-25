@@ -46,7 +46,7 @@ cuda_kmeans(
 A `cuda_kmeans` list containing integer `cluster` assignments, final
 `centers`, per-cluster `withinss`, `tot.withinss`, the number of
 `iter`ations, a logical `converged` flag, and the actual distance
-`device`.
+`device`. Observation and feature names are retained when supplied.
 
 ## Examples
 

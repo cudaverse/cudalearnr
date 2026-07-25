@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">cudalearnr</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,6 +33,12 @@
     </div>
 
     <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.1.2" id="cudalearnr-012">cudalearnr 0.1.2<a class="anchor" aria-label="anchor" href="#cudalearnr-012"></a></h2>
+<ul><li>SVD, PCA, distance, kNN, and k-means results now preserve observation and feature identifiers consistently on CPU and CUDA backends. PCA and SVD components receive stable names.</li>
+<li>
+<code><a href="../reference/cuda_pca.html">cuda_pca()</a></code> now rejects non-logical <code>center</code> and <code>scale.</code> values consistently before backend dispatch.</li>
+</ul></div>
+    <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.1.1" id="cudalearnr-011">cudalearnr 0.1.1<a class="anchor" aria-label="anchor" href="#cudalearnr-011"></a></h2>
 <ul><li>
 <code><a href="../reference/cuda_knn.html">cuda_knn()</a></code> now performs exact neighbour search in configurable query batches, avoiding allocation of the complete pairwise distance matrix. Self-neighbours are excluded explicitly and equal distances are resolved by input row number, independently of batch size.</li>
@@ -41,7 +47,8 @@
 <code><a href="../reference/cuda_kmeans.html">cuda_kmeans()</a></code> now recomputes assignments against its returned centers and derives <code>withinss</code> from that final assignment, including when <code>iter.max</code> is reached.</li>
 <li>Cosine distance now rejects zero rows consistently before CPU/CUDA dispatch and uses scale-first normalization for extreme finite values.</li>
 </ul></div>
-  </main></div>
+  </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
+    </nav></aside></div>
 
 
     <footer><div class="pkgdown-footer-left">

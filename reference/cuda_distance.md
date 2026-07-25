@@ -30,7 +30,8 @@ cuda_distance(
 
 ## Value
 
-A dense numeric distance matrix with a `device` attribute.
+A dense numeric distance matrix with a `device` attribute. Input
+observation names are retained as row and column names when present.
 
 ## Examples
 

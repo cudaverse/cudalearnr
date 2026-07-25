@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">cudalearnr</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -102,6 +102,13 @@
 <span><span class="op">)</span></span></code></pre></div>
 <p>At most <code>min(batch_size, nrow(x)) * nrow(x)</code> distances are held at once, instead of an <code>nrow(x) * nrow(x)</code> distance matrix. The returned <code>index</code> and <code>distance</code> matrices require only <code>nrow(x) * k</code> entries. A smaller batch uses less memory; a larger batch can improve throughput. This is still an exact quadratic-time algorithm.</p>
 <p>Each observation excludes itself. When multiple candidates have exactly the same distance, the candidate with the smaller input row number is selected first, so changing <code>batch_size</code> does not change the result.</p>
+</div>
+<div class="section level2">
+<h2 id="identifier-preservation">Identifier preservation<a class="anchor" aria-label="anchor" href="#identifier-preservation"></a>
+</h2>
+<p>Observation and feature names are part of the result contract. PCA scores, distances, neighbour queries, singular vectors, and cluster assignments retain the corresponding input names on both CPU and CUDA backends. PCA components use stable <code>PC1</code>, <code>PC2</code>, … names, and kNN neighbour identities can be mapped without relying on an external reordered table:</p>
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">neighbors</span><span class="op">$</span><span class="va">index</span><span class="op">)</span><span class="op">[</span><span class="va">neighbors</span><span class="op">$</span><span class="va">index</span><span class="op">]</span></span></code></pre></div>
 <p>On CUDA, the validated input is uploaded once, distance blocks are computed with torch, and each block is returned to the CPU for deterministic ordering. Neighbour selection is therefore not yet fully device-resident. Use <code><a href="reference/cuda_distance.html">cuda_distance()</a></code> only when the complete dense pairwise matrix is actually needed.</p>
 <p>The first release prioritizes correctness and a stable R API. Approximate neighbour search and fully device-resident neighbour selection remain future milestones.</p>
 <p>For installation, device verification, memory advice, and common failures, see the cudaverse <a href="https://github.com/cudaverse/.github/blob/main/GPU_SETUP.md" class="external-link">GPU setup and troubleshooting guide</a>.</p>

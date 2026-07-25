@@ -29,17 +29,19 @@ cuda_svd(
 
 ## Value
 
-A list with `d`, `u`, `v`, and the actual `device`.
+A list with `d`, `u`, `v`, and the actual `device`. Matrix row and
+column names are retained on the corresponding singular vectors.
 
 ## Examples
 
 ``` r
 cuda_svd(matrix(rnorm(30), 10, 3), device = "cpu")
 #> $d
-#> [1] 2.869171 1.661290 1.475526
+#>     SVD1     SVD2     SVD3 
+#> 2.869171 1.661290 1.475526 
 #> 
 #> $u
-#>              [,1]        [,2]        [,3]
+#>              SVD1        SVD2        SVD3
 #>  [1,] -0.04150433  0.22856936 -0.48180687
 #>  [2,] -0.39082093 -0.61741638  0.15778587
 #>  [3,]  0.42570053  0.06499382  0.63448576
@@ -52,7 +54,7 @@ cuda_svd(matrix(rnorm(30), 10, 3), device = "cpu")
 #> [10,] -0.01260843  0.18203753 -0.14703610
 #> 
 #> $v
-#>            [,1]        [,2]       [,3]
+#>            SVD1        SVD2       SVD3
 #> [1,]  0.5081674  0.08897574  0.8566500
 #> [2,] -0.3074937 -0.91035209  0.2769597
 #> [3,]  0.8044958 -0.40415639 -0.4352518
