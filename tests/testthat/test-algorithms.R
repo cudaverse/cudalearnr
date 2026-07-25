@@ -60,6 +60,20 @@ test_that("k-means returns coherent clusters", {
   expect_true(all(fit$cluster %in% 1:2))
 })
 
+test_that("seeded k-means does not mutate the caller RNG state", {
+  x <- test_matrix()
+  set.seed(99)
+  before <- .Random.seed
+
+  cuda_kmeans(x, 2, seed = 1, device = "cpu")
+
+  expect_identical(.Random.seed, before)
+  expect_error(
+    cuda_kmeans(x, 2, seed = 1.5, device = "cpu"),
+    "whole number"
+  )
+})
+
 test_that("invalid algorithm inputs fail clearly", {
   x <- test_matrix()
   expect_error(cuda_pca(x, n_components = 10, device = "cpu"), "between")

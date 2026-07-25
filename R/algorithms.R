@@ -27,6 +27,35 @@
   device
 }
 
+.with_preserved_seed <- function(seed, code) {
+  if (is.null(seed)) {
+    return(force(code))
+  }
+  if (!is.numeric(seed) || length(seed) != 1L || is.na(seed) ||
+      !is.finite(seed)) {
+    stop("`seed` must be NULL or one finite whole number.", call. = FALSE)
+  }
+  integer_seed <- suppressWarnings(as.integer(seed))
+  if (is.na(integer_seed) || seed != integer_seed) {
+    stop("`seed` must be NULL or one finite whole number.", call. = FALSE)
+  }
+
+  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  if (had_seed) {
+    old_seed <- get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  }
+  on.exit({
+    if (had_seed) {
+      assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      rm(".Random.seed", envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+
+  set.seed(integer_seed)
+  force(code)
+}
+
 .torch_matrix <- function(x) {
   torch::torch_tensor(
     x,
@@ -303,17 +332,16 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
       is.na(tolerance) || !is.finite(tolerance) || tolerance <= 0) {
     stop("`tolerance` must be a positive finite number.", call. = FALSE)
   }
-  if (!is.null(seed)) {
-    set.seed(seed)
-  }
-
   if (length(centers) == 1L && is.numeric(centers)) {
     k <- as.integer(centers)
     if (is.na(k) || k < 1L || k >= nrow(x) || centers != k) {
       stop("Numeric `centers` must be between 1 and nrow(x) - 1.",
            call. = FALSE)
     }
-    centre_matrix <- x[sample.int(nrow(x), k), , drop = FALSE]
+    centre_matrix <- .with_preserved_seed(
+      seed,
+      x[sample.int(nrow(x), k), , drop = FALSE]
+    )
   } else {
     centre_matrix <- .learn_matrix(as.matrix(centers), "centers",
                                    min_rows = 1L)
