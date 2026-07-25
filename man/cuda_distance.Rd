@@ -20,7 +20,8 @@ computes all pairwise distances within \code{x}.}
 \item{device}{One of \code{"auto"}, \code{"cuda"}, or \code{"cpu"}.}
 }
 \value{
-A dense numeric distance matrix with a \code{device} attribute.
+A dense numeric distance matrix with a \code{device} attribute. Input
+observation names are retained as row and column names when present.
 }
 \description{
 Pairwise distances with an optional CUDA backend

@@ -28,6 +28,9 @@ Larger batches may be faster but use more memory.}
 A \code{cuda_knn} list with \code{index} and \code{distance} matrices of size
 \code{nrow(x)} by \code{k}, followed by the selected \code{metric} and actual \code{device}.
 Neighbours in every row are ordered by distance and then row index.
+When \code{x} has row names, both matrices retain them as query identifiers;
+neighbour identities can be recovered with
+\code{rownames(result$index)[result$index]}.
 }
 \description{
 k-nearest neighbours

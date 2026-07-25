@@ -19,7 +19,8 @@ cuda_svd(
 \item{device}{One of \code{"auto"}, \code{"cuda"}, or \code{"cpu"}.}
 }
 \value{
-A list with \code{d}, \code{u}, \code{v}, and the actual \code{device}.
+A list with \code{d}, \code{u}, \code{v}, and the actual \code{device}. Matrix row and
+column names are retained on the corresponding singular vectors.
 }
 \description{
 GPU-aware singular value decomposition

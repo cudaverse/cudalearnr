@@ -66,6 +66,18 @@ Each observation excludes itself. When multiple candidates have exactly the
 same distance, the candidate with the smaller input row number is selected
 first, so changing `batch_size` does not change the result.
 
+## Identifier preservation
+
+Observation and feature names are part of the result contract. PCA scores,
+distances, neighbour queries, singular vectors, and cluster assignments retain
+the corresponding input names on both CPU and CUDA backends. PCA components
+use stable `PC1`, `PC2`, ... names, and kNN neighbour identities can be mapped
+without relying on an external reordered table:
+
+```r
+rownames(neighbors$index)[neighbors$index]
+```
+
 On CUDA, the validated input is uploaded once, distance blocks are computed
 with torch, and each block is returned to the CPU for deterministic ordering.
 Neighbour selection is therefore not yet fully device-resident. Use

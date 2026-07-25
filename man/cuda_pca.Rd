@@ -26,6 +26,8 @@ cuda_pca(
 \value{
 A \code{cuda_pca} object with scores in \code{x}, loadings in \code{rotation},
 standard deviations, centring/scaling values, and actual device.
+Observation names, feature names, and stable \code{PC1}, \code{PC2}, ... component
+names are preserved on every backend.
 }
 \description{
 GPU-aware principal component analysis

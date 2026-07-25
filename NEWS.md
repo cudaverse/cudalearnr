@@ -1,3 +1,11 @@
+# cudalearnr 0.1.2
+
+- SVD, PCA, distance, kNN, and k-means results now preserve observation and
+  feature identifiers consistently on CPU and CUDA backends. PCA and SVD
+  components receive stable names.
+- `cuda_pca()` now rejects non-logical `center` and `scale.` values consistently
+  before backend dispatch.
+
 # cudalearnr 0.1.1
 
 - `cuda_knn()` now performs exact neighbour search in configurable query

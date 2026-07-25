@@ -27,6 +27,31 @@
   device
 }
 
+.learn_flag <- function(value, argument) {
+  if (!is.logical(value) || length(value) != 1L || is.na(value)) {
+    stop(sprintf("`%s` must be TRUE or FALSE.", argument), call. = FALSE)
+  }
+  value
+}
+
+.learn_component_names <- function(prefix, n) {
+  paste0(prefix, seq_len(n))
+}
+
+.named_pca_result <- function(result, observation_names, feature_names) {
+  component_names <- .learn_component_names("PC", ncol(result$rotation))
+  dimnames(result$rotation) <- list(feature_names, component_names)
+  dimnames(result$x) <- list(observation_names, component_names)
+  names(result$sdev) <- component_names
+  if (is.numeric(result$center)) {
+    names(result$center) <- feature_names
+  }
+  if (is.numeric(result$scale)) {
+    names(result$scale) <- feature_names
+  }
+  structure(result, class = "cuda_pca")
+}
+
 .with_preserved_seed <- function(seed, code) {
   if (is.null(seed)) {
     return(force(code))
@@ -73,7 +98,8 @@
 #' @param x A finite numeric matrix or `cudatensor`.
 #' @param nu,nv Number of left and right singular vectors to return.
 #' @param device One of `"auto"`, `"cuda"`, or `"cpu"`.
-#' @return A list with `d`, `u`, `v`, and the actual `device`.
+#' @return A list with `d`, `u`, `v`, and the actual `device`. Matrix row and
+#'   column names are retained on the corresponding singular vectors.
 #' @export
 #' @examples
 #' cuda_svd(matrix(rnorm(30), 10, 3), device = "cpu")
@@ -81,6 +107,8 @@ cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
                      nv = min(nrow(x), ncol(x)),
                      device = c("auto", "cuda", "cpu")) {
   x <- .learn_matrix(x)
+  observation_names <- rownames(x)
+  feature_names <- colnames(x)
   device <- .learn_device(device)
   rank <- min(dim(x))
   for (value in list(nu = nu, nv = nv)) {
@@ -95,23 +123,28 @@ cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
 
   if (device == "cpu") {
     result <- base::svd(x, nu = nu, nv = nv)
-    return(structure(
-      list(d = result$d, u = result$u, v = result$v, device = "cpu"),
-      class = "cuda_svd"
-    ))
+    singular_values <- result$d
+    u <- result$u
+    v <- result$v
+  } else {
+    result <- torch::torch_svd(.torch_matrix(x), some = TRUE)
+    u <- if (nu == 0L) matrix(numeric(), nrow(x), 0L) else
+      .torch_array(result[[1]][, seq_len(nu), drop = FALSE])
+    v <- if (nv == 0L) matrix(numeric(), ncol(x), 0L) else
+      .torch_array(result[[3]][, seq_len(nv), drop = FALSE])
+    singular_values <- as.vector(.torch_array(result[[2]]))
   }
 
-  result <- torch::torch_svd(.torch_matrix(x), some = TRUE)
-  u <- if (nu == 0L) matrix(numeric(), nrow(x), 0L) else
-    .torch_array(result[[1]][, seq_len(nu), drop = FALSE])
-  v <- if (nv == 0L) matrix(numeric(), ncol(x), 0L) else
-    .torch_array(result[[3]][, seq_len(nv), drop = FALSE])
+  component_names <- .learn_component_names("SVD", length(singular_values))
+  names(singular_values) <- component_names
+  dimnames(u) <- list(observation_names, utils::head(component_names, nu))
+  dimnames(v) <- list(feature_names, utils::head(component_names, nv))
   structure(
     list(
-      d = as.vector(.torch_array(result[[2]])),
+      d = singular_values,
       u = u,
       v = v,
-      device = "cuda"
+      device = device
     ),
     class = "cuda_svd"
   )
@@ -126,6 +159,8 @@ cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
 #' @param device One of `"auto"`, `"cuda"`, or `"cpu"`.
 #' @return A `cuda_pca` object with scores in `x`, loadings in `rotation`,
 #'   standard deviations, centring/scaling values, and actual device.
+#'   Observation names, feature names, and stable `PC1`, `PC2`, ... component
+#'   names are preserved on every backend.
 #' @export
 #' @examples
 #' fit <- cuda_pca(iris[, 1:4], n_components = 2, device = "cpu")
@@ -133,6 +168,10 @@ cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
 cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
                      device = c("auto", "cuda", "cpu")) {
   x <- .learn_matrix(as.matrix(x), min_cols = 2L)
+  observation_names <- rownames(x)
+  feature_names <- colnames(x)
+  center <- .learn_flag(center, "center")
+  scale. <- .learn_flag(scale., "scale.")
   device <- .learn_device(device)
   max_components <- min(nrow(x) - 1L, ncol(x))
   if (!is.numeric(n_components) || length(n_components) != 1L ||
@@ -144,7 +183,7 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
       call. = FALSE
     )
   }
-  if (isTRUE(scale.) && any(apply(x, 2L, stats::sd) == 0)) {
+  if (scale. && any(apply(x, 2L, stats::sd) == 0)) {
     stop("Cannot scale constant features.", call. = FALSE)
   }
   n_components <- as.integer(n_components)
@@ -152,7 +191,7 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
   if (device == "cpu") {
     fit <- stats::prcomp(x, center = center, scale. = scale.,
                          rank. = n_components)
-    return(structure(
+    return(.named_pca_result(
       list(
         sdev = fit$sdev[seq_len(n_components)],
         rotation = fit$rotation[, seq_len(n_components), drop = FALSE],
@@ -161,12 +200,13 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
         scale = fit$scale,
         device = "cpu"
       ),
-      class = "cuda_pca"
+      observation_names = observation_names,
+      feature_names = feature_names
     ))
   }
 
   tensor <- .torch_matrix(x)
-  centre_values <- if (isTRUE(center)) {
+  centre_values <- if (center) {
     tensor$mean(dim = 1L, keepdim = TRUE)
   } else {
     torch::torch_zeros(
@@ -176,7 +216,7 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
     )
   }
   transformed <- tensor - centre_values
-  scale_values <- if (isTRUE(scale.)) {
+  scale_values <- if (scale.) {
     transformed$std(dim = 1L, unbiased = TRUE, keepdim = TRUE)
   } else {
     torch::torch_ones(
@@ -191,7 +231,7 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
   scores <- decomposition[[1]][, components, drop = FALSE] *
     decomposition[[2]][components]
 
-  structure(
+  .named_pca_result(
     list(
       sdev = as.vector(.torch_array(
         decomposition[[2]][components] / sqrt(nrow(x) - 1)
@@ -200,11 +240,12 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
         decomposition[[3]][, components, drop = FALSE]
       ),
       x = .torch_array(scores),
-      center = if (isTRUE(center)) as.vector(.torch_array(centre_values)) else FALSE,
-      scale = if (isTRUE(scale.)) as.vector(.torch_array(scale_values)) else FALSE,
+      center = if (center) as.vector(.torch_array(centre_values)) else FALSE,
+      scale = if (scale.) as.vector(.torch_array(scale_values)) else FALSE,
       device = "cuda"
     ),
-    class = "cuda_pca"
+    observation_names = observation_names,
+    feature_names = feature_names
   )
 }
 
@@ -230,7 +271,8 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
 #'   computes all pairwise distances within `x`.
 #' @param metric `"euclidean"` or `"cosine"`.
 #' @param device One of `"auto"`, `"cuda"`, or `"cpu"`.
-#' @return A dense numeric distance matrix with a `device` attribute.
+#' @return A dense numeric distance matrix with a `device` attribute. Input
+#'   observation names are retained as row and column names when present.
 #' @export
 #' @examples
 #' cuda_distance(matrix(1:12, 4, 3), device = "cpu")
@@ -238,11 +280,14 @@ cuda_distance <- function(x, y = NULL,
                           metric = c("euclidean", "cosine"),
                           device = c("auto", "cuda", "cpu")) {
   x <- .learn_matrix(x)
+  x_names <- rownames(x)
   self <- is.null(y)
   if (self) {
     y <- x
+    y_names <- x_names
   } else {
     y <- .learn_matrix(y, "y")
+    y_names <- rownames(y)
   }
   if (ncol(x) != ncol(y)) {
     stop("`x` and `y` must have the same number of columns.", call. = FALSE)
@@ -276,6 +321,9 @@ cuda_distance <- function(x, y = NULL,
   }
   if (metric == "cosine") {
     distance <- pmin(pmax(distance, 0), 2)
+  }
+  if (!is.null(x_names) || !is.null(y_names)) {
+    dimnames(distance) <- list(x_names, y_names)
   }
   attr(distance, "device") <- device
   distance
@@ -365,6 +413,9 @@ cuda_distance <- function(x, y = NULL,
 #' @return A `cuda_knn` list with `index` and `distance` matrices of size
 #'   `nrow(x)` by `k`, followed by the selected `metric` and actual `device`.
 #'   Neighbours in every row are ordered by distance and then row index.
+#'   When `x` has row names, both matrices retain them as query identifiers;
+#'   neighbour identities can be recovered with
+#'   `rownames(result$index)[result$index]`.
 #'
 #' @details
 #' Neighbours are exact: every row is compared with every other row. The
@@ -387,6 +438,7 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
                      device = c("auto", "cuda", "cpu"),
                      batch_size = 256L) {
   x <- .learn_matrix(x)
+  observation_names <- rownames(x)
   integer_k <- suppressWarnings(as.integer(k))
   if (!is.numeric(k) || length(k) != 1L || is.na(k) ||
       !is.finite(k) || is.na(integer_k) ||
@@ -446,6 +498,15 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
     )
   }
 
+  if (!is.null(observation_names)) {
+    neighbor_names <- paste0("neighbor_", seq_len(integer_k))
+    dimnames(index) <- list(observation_names, neighbor_names)
+    dimnames(neighbour_distance) <- list(
+      observation_names,
+      neighbor_names
+    )
+  }
+
   structure(
     list(
       index = index,
@@ -468,6 +529,7 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
 #' @return A `cuda_kmeans` list containing integer `cluster` assignments,
 #'   final `centers`, per-cluster `withinss`, `tot.withinss`, the number of
 #'   `iter`ations, a logical `converged` flag, and the actual distance `device`.
+#'   Observation and feature names are retained when supplied.
 #' @export
 #' @examples
 #' set.seed(1)
@@ -477,6 +539,8 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
                         seed = NULL,
                         device = c("auto", "cuda", "cpu")) {
   x <- .learn_matrix(x)
+  observation_names <- rownames(x)
+  feature_names <- colnames(x)
   device <- .learn_device(device)
   if (!is.numeric(iter.max) || length(iter.max) != 1L ||
       is.na(iter.max) || iter.max < 1 || iter.max != as.integer(iter.max)) {
@@ -535,6 +599,13 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
     },
     numeric(1)
   )
+
+  if (!is.null(observation_names) || !is.null(feature_names)) {
+    cluster_names <- paste0("cluster_", seq_len(k))
+    names(cluster) <- observation_names
+    dimnames(centre_matrix) <- list(cluster_names, feature_names)
+    names(withinss) <- cluster_names
+  }
 
   structure(
     list(

@@ -25,7 +25,45 @@ test_that("PCA matches prcomp variance and dimensions", {
 
   expect_s3_class(fit, "cuda_pca")
   expect_identical(dim(fit$x), c(6L, 2L))
-  expect_equal(fit$sdev, expected$sdev[1:2])
+  expect_equal(unname(fit$sdev), expected$sdev[1:2])
+  expect_identical(names(fit$sdev), c("PC1", "PC2"))
+})
+
+test_that("algorithms preserve observation and feature identifiers", {
+  x <- test_matrix()
+  rownames(x) <- paste0("cell_", seq_len(nrow(x)))
+  colnames(x) <- paste0("feature_", seq_len(ncol(x)))
+
+  decomposition <- cuda_svd(x, nu = 2, nv = 2, device = "cpu")
+  expect_identical(rownames(decomposition$u), rownames(x))
+  expect_identical(rownames(decomposition$v), colnames(x))
+  expect_identical(colnames(decomposition$u), c("SVD1", "SVD2"))
+
+  pca <- cuda_pca(x, n_components = 2, device = "cpu")
+  expect_identical(rownames(pca$x), rownames(x))
+  expect_identical(rownames(pca$rotation), colnames(x))
+  expect_identical(colnames(pca$x), c("PC1", "PC2"))
+  expect_identical(names(pca$center), colnames(x))
+
+  distance <- cuda_distance(x, device = "cpu")
+  expect_identical(dimnames(distance), list(rownames(x), rownames(x)))
+
+  neighbors <- cuda_knn(x, k = 2, device = "cpu", batch_size = 2)
+  expect_identical(rownames(neighbors$index), rownames(x))
+  neighbor_labels <- matrix(
+    rownames(neighbors$index)[as.vector(neighbors$index)],
+    nrow = nrow(neighbors$index),
+    dimnames = dimnames(neighbors$index)
+  )
+  expect_identical(dim(neighbor_labels), dim(neighbors$index))
+  expect_true(all(neighbor_labels %in% rownames(x)))
+  expect_identical(dimnames(neighbors$distance), dimnames(neighbors$index))
+
+  clusters <- cuda_kmeans(x, centers = 2, seed = 1, device = "cpu")
+  expect_identical(names(clusters$cluster), rownames(x))
+  expect_identical(colnames(clusters$centers), colnames(x))
+  expect_identical(rownames(clusters$centers), c("cluster_1", "cluster_2"))
+  expect_identical(names(clusters$withinss), rownames(clusters$centers))
 })
 
 test_that("distance supports Euclidean and cosine metrics", {
@@ -300,4 +338,6 @@ test_that("invalid algorithm inputs fail clearly", {
     cuda_distance(x, matrix(1:8, 4, 2), device = "cpu"),
     "same number of columns"
   )
+  expect_error(cuda_pca(x, center = NA, device = "cpu"), "TRUE or FALSE")
+  expect_error(cuda_pca(x, scale. = 1, device = "cpu"), "TRUE or FALSE")
 })
