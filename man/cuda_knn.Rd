@@ -8,7 +8,8 @@ cuda_knn(
   x,
   k = 15L,
   metric = c("euclidean", "cosine"),
-  device = c("auto", "cuda", "cpu")
+  device = c("auto", "cuda", "cpu"),
+  batch_size = 256L
 )
 }
 \arguments{
@@ -16,16 +17,36 @@ cuda_knn(
 
 \item{k}{Number of neighbours.}
 
-\item{metric}{Distance metric passed to \code{\link[=cuda_distance]{cuda_distance()}}.}
+\item{metric}{Exact distance metric, \code{"euclidean"} or \code{"cosine"}.}
 
 \item{device}{One of \code{"auto"}, \code{"cuda"}, or \code{"cpu"}.}
+
+\item{batch_size}{Maximum number of query rows in each dense distance block.
+Larger batches may be faster but use more memory.}
 }
 \value{
-A \code{cuda_knn} object with integer neighbour indices and distances.
+A \code{cuda_knn} list with \code{index} and \code{distance} matrices of size
+\code{nrow(x)} by \code{k}, followed by the selected \code{metric} and actual \code{device}.
+Neighbours in every row are ordered by distance and then row index.
 }
 \description{
 k-nearest neighbours
 }
+\details{
+Neighbours are exact: every row is compared with every other row. The
+observation itself is always excluded. Equal distances are resolved
+deterministically in favour of the smaller row index.
+
+The implementation constructs at most a
+\code{min(batch_size, nrow(x))}-by-\code{nrow(x)} dense distance block instead of a
+complete pairwise distance matrix. On CUDA, distance blocks are computed
+with torch and transferred to the CPU for deterministic neighbour ordering.
+}
 \examples{
-cuda_knn(matrix(rnorm(30), 10, 3), k = 3, device = "cpu")
+cuda_knn(
+  matrix(rnorm(30), 10, 3),
+  k = 3,
+  batch_size = 4,
+  device = "cpu"
+)
 }

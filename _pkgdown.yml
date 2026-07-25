@@ -1,0 +1,17 @@
+url: https://cudaverse.github.io/cudalearnr/
+
+template:
+  bootstrap: 5
+
+reference:
+- title: Decomposition and dimensionality reduction
+  contents:
+  - cuda_svd
+  - cuda_pca
+- title: Distances and nearest neighbours
+  contents:
+  - cuda_distance
+  - cuda_knn
+- title: Clustering
+  contents:
+  - cuda_kmeans

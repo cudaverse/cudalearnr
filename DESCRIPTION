@@ -1,6 +1,6 @@
 Package: cudalearnr
 Title: GPU-Aware Numerical Learning Algorithms for R
-Version: 0.1.0
+Version: 0.1.1
 Authors@R:
     person("Yaoxiang", "Li", email = "liyaoxiang@outlook.com",
            role = c("aut", "cre"))
@@ -10,12 +10,13 @@ Description: Provides experimental GPU-aware numerical algorithms for R,
     optional CUDA-enabled 'torch' backend and portable base R fallbacks with
     explicit reporting of the backend used.
 License: MIT + file LICENSE
-URL: https://github.com/cudaverse/cudalearnr
+URL: https://cudaverse.github.io/cudalearnr/,
+    https://github.com/cudaverse/cudalearnr
 BugReports: https://github.com/cudaverse/cudalearnr/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Imports:
-    cudatensr,
+    cudatensr (>= 0.1.1),
     stats
 Remotes:
     cudaverse/cudatensr

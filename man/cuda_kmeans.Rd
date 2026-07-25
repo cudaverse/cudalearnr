@@ -27,7 +27,9 @@ cuda_kmeans(
 \item{device}{Device used for the distance step.}
 }
 \value{
-A \code{cuda_kmeans} object.
+A \code{cuda_kmeans} list containing integer \code{cluster} assignments,
+final \code{centers}, per-cluster \code{withinss}, \code{tot.withinss}, the number of
+\code{iter}ations, a logical \code{converged} flag, and the actual distance \code{device}.
 }
 \description{
 GPU-aware k-means clustering

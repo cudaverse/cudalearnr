@@ -76,9 +76,141 @@ test_that("cosine normalization is stable across extreme finite scales", {
 test_that("k-nearest neighbours exclude each observation", {
   fit <- cuda_knn(test_matrix(), k = 2, device = "cpu")
 
+  expect_named(fit, c("index", "distance", "metric", "device"))
   expect_identical(dim(fit$index), c(6L, 2L))
   expect_false(any(fit$index == row(fit$index)))
   expect_true(all(fit$distance >= 0))
+})
+
+test_that("batched exact neighbours match full pairwise distances", {
+  x <- test_matrix()
+  reference_index <- seq_len(nrow(x))
+
+  for (metric in c("euclidean", "cosine")) {
+    full_distance <- cuda_distance(x, metric = metric, device = "cpu")
+    expected_index <- vapply(
+      reference_index,
+      function(i) {
+        candidates <- reference_index[-i]
+        ordering <- order(
+          full_distance[i, candidates],
+          candidates,
+          method = "radix"
+        )
+        candidates[ordering[1:2]]
+      },
+      integer(2)
+    )
+    expected_index <- t(expected_index)
+    expected_distance <- matrix(
+      full_distance[cbind(
+        rep(reference_index, each = 2L),
+        as.vector(t(expected_index))
+      )],
+      nrow = nrow(x),
+      byrow = TRUE
+    )
+
+    for (batch_size in c(1L, 2L, 100L)) {
+      fit <- cuda_knn(
+        x,
+        k = 2,
+        metric = metric,
+        device = "cpu",
+        batch_size = batch_size
+      )
+
+      expect_identical(fit$index, expected_index)
+      expect_equal(fit$distance, expected_distance, tolerance = 1e-12)
+      expect_identical(fit$metric, metric)
+      expect_identical(fit$device, "cpu")
+    }
+  }
+})
+
+test_that("distance blocks never exceed the requested query batch", {
+  x <- test_matrix()
+  state <- cudalearnr:::.knn_distance_state(
+    x,
+    metric = "euclidean",
+    device = "cpu"
+  )
+  blocks <- list(1:2, 3:4, 5:6)
+  distance <- lapply(
+    blocks,
+    function(rows) cudalearnr:::.knn_distance_block(state, rows)
+  )
+
+  expect_true(all(vapply(distance, nrow, integer(1)) <= 2L))
+  expect_true(all(vapply(distance, ncol, integer(1)) == nrow(x)))
+  expect_equal(
+    do.call(rbind, distance),
+    cuda_distance(x, device = "cpu"),
+    tolerance = 1e-12,
+    ignore_attr = TRUE
+  )
+})
+
+test_that("kNN ties and self exclusion are deterministic", {
+  tied <- matrix(c(0, 2, 4), ncol = 1)
+  fit <- cuda_knn(
+    tied,
+    k = 1,
+    device = "cpu",
+    batch_size = 1
+  )
+
+  expect_identical(as.vector(fit$index), c(2L, 1L, 2L))
+  expect_equal(as.vector(fit$distance), c(2, 2, 2))
+
+  duplicated <- matrix(c(0, 0, 1), ncol = 1)
+  duplicate_fit <- cuda_knn(
+    duplicated,
+    k = 1,
+    device = "cpu",
+    batch_size = 2
+  )
+
+  expect_identical(as.vector(duplicate_fit$index), c(2L, 1L, 1L))
+  expect_false(any(duplicate_fit$index == row(duplicate_fit$index)))
+})
+
+test_that("kNN validates batch sizes and cosine rows clearly", {
+  x <- test_matrix()
+
+  for (batch_size in list(0, -1, 1.5, Inf, NA_real_, numeric())) {
+    expect_error(
+      cuda_knn(x, k = 2, batch_size = batch_size, device = "cpu"),
+      "positive whole number"
+    )
+  }
+  expect_error(
+    cuda_knn(x, k = Inf, device = "cpu"),
+    "between 1 and nrow"
+  )
+
+  zero <- rbind(c(0, 0), c(1, 0), c(0, 1))
+  expect_error(
+    cuda_knn(
+      zero,
+      k = 1,
+      metric = "cosine",
+      device = "cuda",
+      batch_size = 1
+    ),
+    "zero-length rows"
+  )
+})
+
+test_that("CUDA batched neighbours agree with CPU reference", {
+  skip_if_not(cudatensr::cuda_available())
+  x <- test_matrix()
+  cpu <- cuda_knn(x, k = 2, device = "cpu", batch_size = 2)
+  gpu <- cuda_knn(x, k = 2, device = "cuda", batch_size = 2)
+
+  expect_identical(gpu$index, cpu$index)
+  expect_equal(gpu$distance, cpu$distance, tolerance = 1e-8)
+  expect_identical(gpu$device, "cuda")
 })
 
 test_that("k-means returns coherent clusters", {

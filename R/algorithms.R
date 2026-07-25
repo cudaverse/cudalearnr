@@ -274,7 +274,83 @@ cuda_distance <- function(x, y = NULL,
   } else {
     distance <- 1 - tcrossprod(x_unit, y_unit)
   }
+  if (metric == "cosine") {
+    distance <- pmin(pmax(distance, 0), 2)
+  }
   attr(distance, "device") <- device
+  distance
+}
+
+.knn_batch_size <- function(batch_size, n) {
+  integer_batch_size <- suppressWarnings(as.integer(batch_size))
+  if (!is.numeric(batch_size) || length(batch_size) != 1L ||
+      is.na(batch_size) || !is.finite(batch_size) ||
+      is.na(integer_batch_size) || integer_batch_size < 1L ||
+      batch_size != integer_batch_size) {
+    stop("`batch_size` must be one positive whole number.", call. = FALSE)
+  }
+  min(integer_batch_size, n)
+}
+
+.knn_distance_state <- function(x, metric, device, cosine_values = NULL) {
+  values <- if (metric == "cosine") {
+    if (is.null(cosine_values)) {
+      .cosine_unit_rows(x, "x")
+    } else {
+      cosine_values
+    }
+  } else {
+    x
+  }
+  storage <- if (device == "cuda") .torch_matrix(values) else NULL
+  squared_norm <- if (device == "cpu" && metric == "euclidean") {
+    rowSums(values^2)
+  } else {
+    NULL
+  }
+  list(
+    values = values,
+    storage = storage,
+    squared_norm = squared_norm,
+    metric = metric,
+    device = device
+  )
+}
+
+.knn_distance_block <- function(state, rows) {
+  if (state$device == "cuda") {
+    query <- state$storage[rows, , drop = FALSE]
+    result <- if (state$metric == "euclidean") {
+      torch::torch_cdist(query, state$storage, p = 2)
+    } else {
+      1 - query$matmul(state$storage$t())
+    }
+    distance <- .torch_array(result)
+  } else if (state$metric == "euclidean") {
+    squared <- outer(
+      state$squared_norm[rows],
+      state$squared_norm,
+      "+"
+    ) - 2 * tcrossprod(
+      state$values[rows, , drop = FALSE],
+      state$values
+    )
+    distance <- sqrt(pmax(squared, 0))
+  } else {
+    distance <- 1 - tcrossprod(
+      state$values[rows, , drop = FALSE],
+      state$values
+    )
+  }
+
+  distance <- matrix(
+    distance,
+    nrow = length(rows),
+    ncol = nrow(state$values)
+  )
+  if (state$metric == "cosine") {
+    distance <- pmin(pmax(distance, 0), 2)
+  }
   distance
 }
 
@@ -282,40 +358,100 @@ cuda_distance <- function(x, y = NULL,
 #'
 #' @param x Numeric matrix with observations in rows.
 #' @param k Number of neighbours.
-#' @param metric Distance metric passed to [cuda_distance()].
+#' @param metric Exact distance metric, `"euclidean"` or `"cosine"`.
 #' @param device One of `"auto"`, `"cuda"`, or `"cpu"`.
-#' @return A `cuda_knn` object with integer neighbour indices and distances.
+#' @param batch_size Maximum number of query rows in each dense distance block.
+#'   Larger batches may be faster but use more memory.
+#' @return A `cuda_knn` list with `index` and `distance` matrices of size
+#'   `nrow(x)` by `k`, followed by the selected `metric` and actual `device`.
+#'   Neighbours in every row are ordered by distance and then row index.
+#'
+#' @details
+#' Neighbours are exact: every row is compared with every other row. The
+#' observation itself is always excluded. Equal distances are resolved
+#' deterministically in favour of the smaller row index.
+#'
+#' The implementation constructs at most a
+#' `min(batch_size, nrow(x))`-by-`nrow(x)` dense distance block instead of a
+#' complete pairwise distance matrix. On CUDA, distance blocks are computed
+#' with torch and transferred to the CPU for deterministic neighbour ordering.
 #' @export
 #' @examples
-#' cuda_knn(matrix(rnorm(30), 10, 3), k = 3, device = "cpu")
+#' cuda_knn(
+#'   matrix(rnorm(30), 10, 3),
+#'   k = 3,
+#'   batch_size = 4,
+#'   device = "cpu"
+#' )
 cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
-                     device = c("auto", "cuda", "cpu")) {
+                     device = c("auto", "cuda", "cpu"),
+                     batch_size = 256L) {
   x <- .learn_matrix(x)
+  integer_k <- suppressWarnings(as.integer(k))
   if (!is.numeric(k) || length(k) != 1L || is.na(k) ||
-      k < 1 || k >= nrow(x) || k != as.integer(k)) {
+      !is.finite(k) || is.na(integer_k) ||
+      integer_k < 1L || integer_k >= nrow(x) || k != integer_k) {
     stop("`k` must be a whole number between 1 and nrow(x) - 1.",
          call. = FALSE)
   }
   metric <- match.arg(metric)
-  distances <- cuda_distance(x, metric = metric, device = device)
-  diag(distances) <- Inf
-  k <- as.integer(k)
-  index <- t(vapply(
-    seq_len(nrow(x)),
-    function(i) order(distances[i, ], method = "radix")[seq_len(k)],
-    integer(k)
-  ))
-  neighbour_distance <- matrix(
-    distances[cbind(rep(seq_len(nrow(x)), each = k), as.vector(t(index)))],
-    nrow = nrow(x),
-    byrow = TRUE
-  )
+  cosine_values <- if (metric == "cosine") {
+    .cosine_unit_rows(x, "x")
+  } else {
+    NULL
+  }
+  device <- .learn_device(device)
+  batch_size <- .knn_batch_size(batch_size, nrow(x))
+  state <- .knn_distance_state(x, metric, device, cosine_values)
+  reference_index <- seq_len(nrow(x))
+  index <- matrix(NA_integer_, nrow(x), integer_k)
+  neighbour_distance <- matrix(NA_real_, nrow(x), integer_k)
+
+  starts <- seq.int(1L, nrow(x), by = batch_size)
+  for (start in starts) {
+    rows <- seq.int(
+      start,
+      length.out = min(batch_size, nrow(x) - start + 1L)
+    )
+    distances <- .knn_distance_block(state, rows)
+    selected <- vapply(
+      seq_along(rows),
+      function(i) {
+        candidates <- reference_index[-rows[[i]]]
+        ordering <- order(
+          distances[i, candidates],
+          candidates,
+          method = "radix"
+        )
+        candidates[ordering[seq_len(integer_k)]]
+      },
+      integer(integer_k)
+    )
+    selected <- t(matrix(
+      selected,
+      nrow = integer_k,
+      ncol = length(rows)
+    ))
+    selected_distance <- distances[cbind(
+      rep(seq_along(rows), each = integer_k),
+      as.vector(t(selected))
+    )]
+
+    index[rows, ] <- selected
+    neighbour_distance[rows, ] <- matrix(
+      selected_distance,
+      nrow = length(rows),
+      ncol = integer_k,
+      byrow = TRUE
+    )
+  }
+
   structure(
     list(
       index = index,
       distance = neighbour_distance,
       metric = metric,
-      device = attr(distances, "device")
+      device = device
     ),
     class = "cuda_knn"
   )
@@ -329,7 +465,9 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
 #' @param tolerance Convergence tolerance for centre movement.
 #' @param seed Optional random seed used for initial centres.
 #' @param device Device used for the distance step.
-#' @return A `cuda_kmeans` object.
+#' @return A `cuda_kmeans` list containing integer `cluster` assignments,
+#'   final `centers`, per-cluster `withinss`, `tot.withinss`, the number of
+#'   `iter`ations, a logical `converged` flag, and the actual distance `device`.
 #' @export
 #' @examples
 #' set.seed(1)
