@@ -208,6 +208,22 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
   )
 }
 
+.cosine_unit_rows <- function(x, argument) {
+  row_scale <- apply(abs(x), 1L, max)
+  if (any(row_scale == 0)) {
+    stop(
+      sprintf(
+        "Cosine distance is undefined for zero-length rows in `%s`.",
+        argument
+      ),
+      call. = FALSE
+    )
+  }
+
+  scaled <- x / row_scale
+  scaled / sqrt(rowSums(scaled^2))
+}
+
 #' Pairwise distances with an optional CUDA backend
 #'
 #' @param x,y Numeric matrices with observations in rows. When `y` is `NULL`,
@@ -232,17 +248,23 @@ cuda_distance <- function(x, y = NULL,
     stop("`x` and `y` must have the same number of columns.", call. = FALSE)
   }
   metric <- match.arg(metric)
+  if (metric == "cosine") {
+    x_unit <- .cosine_unit_rows(x, "x")
+    y_unit <- if (self) x_unit else .cosine_unit_rows(y, "y")
+  }
   device <- .learn_device(device)
 
   if (device == "cuda") {
-    x_gpu <- .torch_matrix(x)
-    y_gpu <- if (self) x_gpu else .torch_matrix(y)
+    x_gpu <- .torch_matrix(if (metric == "cosine") x_unit else x)
+    y_gpu <- if (self) {
+      x_gpu
+    } else {
+      .torch_matrix(if (metric == "cosine") y_unit else y)
+    }
     result <- if (metric == "euclidean") {
       torch::torch_cdist(x_gpu, y_gpu, p = 2)
     } else {
-      x_unit <- x_gpu / x_gpu$norm(p = 2, dim = 2L, keepdim = TRUE)
-      y_unit <- y_gpu / y_gpu$norm(p = 2, dim = 2L, keepdim = TRUE)
-      1 - x_unit$matmul(y_unit$t())
+      1 - x_gpu$matmul(y_gpu$t())
     }
     distance <- .torch_array(result)
   } else if (metric == "euclidean") {
@@ -250,13 +272,7 @@ cuda_distance <- function(x, y = NULL,
       2 * tcrossprod(x, y)
     distance <- sqrt(pmax(squared, 0))
   } else {
-    x_norm <- sqrt(rowSums(x^2))
-    y_norm <- sqrt(rowSums(y^2))
-    if (any(x_norm == 0) || any(y_norm == 0)) {
-      stop("Cosine distance is undefined for zero-length rows.",
-           call. = FALSE)
-    }
-    distance <- 1 - tcrossprod(x / x_norm, y / y_norm)
+    distance <- 1 - tcrossprod(x_unit, y_unit)
   }
   attr(distance, "device") <- device
   distance
@@ -353,10 +369,9 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
   }
 
   converged <- FALSE
-  cluster <- integer(nrow(x))
+  final_distance <- cuda_distance(x, centre_matrix, device = device)
+  cluster <- max.col(-final_distance, ties.method = "first")
   for (iteration in seq_len(as.integer(iter.max))) {
-    distances <- cuda_distance(x, centre_matrix, device = device)
-    cluster <- max.col(-distances, ties.method = "first")
     new_centres <- centre_matrix
     for (group in seq_len(k)) {
       members <- x[cluster == group, , drop = FALSE]
@@ -366,15 +381,20 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
     }
     movement <- max(abs(new_centres - centre_matrix))
     centre_matrix <- new_centres
+    final_distance <- cuda_distance(x, centre_matrix, device = device)
+    cluster <- max.col(-final_distance, ties.method = "first")
     if (movement <= tolerance) {
       converged <- TRUE
       break
     }
   }
-  final_distance <- cuda_distance(x, centre_matrix, device = device)
   withinss <- vapply(
     seq_len(k),
-    function(group) sum(final_distance[cluster == group, group]^2),
+    function(group) {
+      members <- which(cluster == group)
+      indices <- cbind(members, rep.int(group, length(members)))
+      sum(final_distance[indices]^2)
+    },
     numeric(1)
   )
 
