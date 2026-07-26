@@ -54,7 +54,7 @@ A `cuda_kmeans` list containing integer `cluster` assignments, final
 set.seed(1)
 x <- rbind(matrix(rnorm(40), 20, 2), matrix(rnorm(40, 4), 20, 2))
 cuda_kmeans(x, centers = 2, seed = 1, device = "cpu")
-#> <cuda_kmeans clusters=2 iterations=2 converged=TRUE device=cpu>
+#> <cuda_kmeans clusters=2 iterations=2 converged=TRUE distance_device=cpu compute=cpu backend=base>
 #>           [,1]         [,2]
 #> [1,] 0.1905239 -0.006471519
 #> [2,] 4.1387968  4.101736906

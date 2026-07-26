@@ -18,3 +18,8 @@
 
 - [`cuda_kmeans()`](https://cudaverse.github.io/cudalearnr/reference/cuda_kmeans.md)
   : GPU-aware k-means clustering
+
+## Provenance
+
+- [`cuda_provenance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_provenance.md)
+  : Inspect actual compute provenance

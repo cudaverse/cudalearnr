@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">cudalearnr</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -32,6 +32,7 @@
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto">
 <li class="nav-item"><a class="nav-link" href="reference/index.html">Reference</a></li>
+<li class="nav-item"><a class="nav-link" href="articles/index.html">Articles</a></li>
 <li class="nav-item"><a class="nav-link" href="news/index.html">Changelog</a></li>
       </ul>
 <ul class="navbar-nav">
@@ -88,12 +89,63 @@
 <h2 id="backend-semantics">Backend semantics<a class="anchor" aria-label="anchor" href="#backend-semantics"></a>
 </h2>
 <p>When a CUDA-enabled R torch installation is available, SVD/PCA, pairwise distances, and kNN distance blocks execute through libtorch on the GPU. k-means uses GPU distance calculations while updating centres in R. Without CUDA, the same APIs use base R and <code>stats</code>.</p>
+<p>Every result records the requested device, actual stage devices, concrete backend, output device, and any automatic fallback. Inspect those fields as a table with <code><a href="reference/cuda_provenance.html">cuda_provenance()</a></code>:</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu">cudatensr</span><span class="fu">::</span><span class="fu"><a href="https://cudaverse.github.io/cudatensr/reference/cuda_diagnostics.html" class="external-link">cuda_diagnostics</a></span><span class="op">(</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/cuda_provenance.html">cuda_provenance</a></span><span class="op">(</span><span class="va">pca</span><span class="op">)</span></span></code></pre></div>
+<table class="table">
+<colgroup>
+<col width="25%">
+<col width="25%">
+<col width="25%">
+<col width="25%">
+</colgroup>
+<thead><tr>
+<th>Function</th>
+<th>Device-selected work</th>
+<th>Always-CPU work</th>
+<th>CUDA aggregate</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code><a href="reference/cuda_svd.html">cuda_svd()</a></code></td>
+<td>decomposition</td>
+<td>R result materialization</td>
+<td><code>cuda</code></td>
+</tr>
+<tr>
+<td><code><a href="reference/cuda_pca.html">cuda_pca()</a></code></td>
+<td>preprocessing and decomposition</td>
+<td>R result materialization</td>
+<td><code>cuda</code></td>
+</tr>
+<tr>
+<td><code><a href="reference/cuda_distance.html">cuda_distance()</a></code></td>
+<td>distance calculation</td>
+<td>R result materialization</td>
+<td><code>cuda</code></td>
+</tr>
+<tr>
+<td><code><a href="reference/cuda_knn.html">cuda_knn()</a></code></td>
+<td>distance blocks</td>
+<td>deterministic neighbour selection</td>
+<td><code>hybrid</code></td>
+</tr>
+<tr>
+<td><code><a href="reference/cuda_kmeans.html">cuda_kmeans()</a></code></td>
+<td>distance calculation</td>
+<td>initialization, assignment, centre updates</td>
+<td><code>hybrid</code></td>
+</tr>
+</tbody>
+</table>
+<p>Here, “CUDA aggregate” describes a successful explicit CUDA run. An automatic request that cannot use CUDA records a CPU fallback instead. See <a href="https://cudaverse.github.io/cudalearnr/articles/backend-provenance.html">Backend provenance and CUDA diagnostics</a> for a runnable CPU tutorial, the complete stage contract, memory guidance, and the hardware-CI gate.</p>
 </div>
 <div class="section level2">
 <h2 id="exact-knn-without-a-full-distance-matrix">Exact kNN without a full distance matrix<a class="anchor" aria-label="anchor" href="#exact-knn-without-a-full-distance-matrix"></a>
 </h2>
 <p><code><a href="reference/cuda_knn.html">cuda_knn()</a></code> compares every observation with every other observation, but works on query batches:</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">neighbors</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cuda_knn.html">cuda_knn</a></span><span class="op">(</span></span>
 <span>  <span class="va">x</span>,</span>
 <span>  k <span class="op">=</span> <span class="fl">15</span>,</span>
@@ -107,7 +159,7 @@
 <h2 id="identifier-preservation">Identifier preservation<a class="anchor" aria-label="anchor" href="#identifier-preservation"></a>
 </h2>
 <p>Observation and feature names are part of the result contract. PCA scores, distances, neighbour queries, singular vectors, and cluster assignments retain the corresponding input names on both CPU and CUDA backends. PCA components use stable <code>PC1</code>, <code>PC2</code>, … names, and kNN neighbour identities can be mapped without relying on an external reordered table:</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">neighbors</span><span class="op">$</span><span class="va">index</span><span class="op">)</span><span class="op">[</span><span class="va">neighbors</span><span class="op">$</span><span class="va">index</span><span class="op">]</span></span></code></pre></div>
 <p>On CUDA, the validated input is uploaded once, distance blocks are computed with torch, and each block is returned to the CPU for deterministic ordering. Neighbour selection is therefore not yet fully device-resident. Use <code><a href="reference/cuda_distance.html">cuda_distance()</a></code> only when the complete dense pairwise matrix is actually needed.</p>
 <p>The first release prioritizes correctness and a stable R API. Approximate neighbour search and fully device-resident neighbour selection remain future milestones.</p>

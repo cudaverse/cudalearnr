@@ -49,6 +49,32 @@ distances, and kNN distance blocks execute through libtorch on the GPU.
 k-means uses GPU distance calculations while updating centres in R.
 Without CUDA, the same APIs use base R and `stats`.
 
+Every result records the requested device, actual stage devices,
+concrete backend, output device, and any automatic fallback. Inspect
+those fields as a table with
+[`cuda_provenance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_provenance.md):
+
+``` r
+
+cudatensr::cuda_diagnostics()
+cuda_provenance(pca)
+```
+
+| Function | Device-selected work | Always-CPU work | CUDA aggregate |
+|----|----|----|----|
+| [`cuda_svd()`](https://cudaverse.github.io/cudalearnr/reference/cuda_svd.md) | decomposition | R result materialization | `cuda` |
+| [`cuda_pca()`](https://cudaverse.github.io/cudalearnr/reference/cuda_pca.md) | preprocessing and decomposition | R result materialization | `cuda` |
+| [`cuda_distance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_distance.md) | distance calculation | R result materialization | `cuda` |
+| [`cuda_knn()`](https://cudaverse.github.io/cudalearnr/reference/cuda_knn.md) | distance blocks | deterministic neighbour selection | `hybrid` |
+| [`cuda_kmeans()`](https://cudaverse.github.io/cudalearnr/reference/cuda_kmeans.md) | distance calculation | initialization, assignment, centre updates | `hybrid` |
+
+Here, “CUDA aggregate” describes a successful explicit CUDA run. An
+automatic request that cannot use CUDA records a CPU fallback instead.
+See [Backend provenance and CUDA
+diagnostics](https://cudaverse.github.io/cudalearnr/articles/backend-provenance.html)
+for a runnable CPU tutorial, the complete stage contract, memory
+guidance, and the hardware-CI gate.
+
 ## Exact kNN without a full distance matrix
 
 [`cuda_knn()`](https://cudaverse.github.io/cudalearnr/reference/cuda_knn.md)

@@ -67,5 +67,5 @@ cuda_knn(
   batch_size = 4,
   device = "cpu"
 )
-#> <cuda_knn observations=10 k=3 metric=euclidean device=cpu>
+#> <cuda_knn observations=10 k=3 metric=euclidean distance_device=cpu compute=cpu backend=base>
 ```

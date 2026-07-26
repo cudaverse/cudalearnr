@@ -48,7 +48,7 @@ preserved on every backend.
 ``` r
 fit <- cuda_pca(iris[, 1:4], n_components = 2, device = "cpu")
 fit
-#> <cuda_pca components=2 device=cpu>
+#> <cuda_pca components=2 device=cpu compute=cpu backend=stats>
 #>                      PC1         PC2
 #> Sepal.Length  0.36138659 -0.65658877
 #> Sepal.Width  -0.08452251 -0.73016143

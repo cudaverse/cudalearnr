@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">cudalearnr</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -16,6 +16,7 @@
 
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto"><li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
+<li class="nav-item"><a class="nav-link" href="../articles/index.html">Articles</a></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
@@ -72,34 +73,7 @@ column names are retained on the corresponding singular vectors.</p>
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="fu">cuda_svd</span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="fl">30</span><span class="op">)</span>, <span class="fl">10</span>, <span class="fl">3</span><span class="op">)</span>, device <span class="op">=</span> <span class="st">"cpu"</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $d</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     SVD1     SVD2     SVD3 </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 2.869171 1.661290 1.475526 </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $u</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>              SVD1        SVD2        SVD3</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [1,] -0.04150433  0.22856936 -0.48180687</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [2,] -0.39082093 -0.61741638  0.15778587</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [3,]  0.42570053  0.06499382  0.63448576</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [4,] -0.52175072  0.43293582  0.03641741</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [5,]  0.05996450 -0.03078349 -0.22963435</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [6,] -0.57675901 -0.03777884  0.35893887</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [7,] -0.13318252  0.09639454 -0.11080516</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [8,] -0.19352735  0.13419311 -0.01327715</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>  [9,] -0.02226106  0.55864409  0.35131843</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [10,] -0.01260843  0.18203753 -0.14703610</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $v</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>            SVD1        SVD2       SVD3</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1,]  0.5081674  0.08897574  0.8566500</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [2,] -0.3074937 -0.91035209  0.2769597</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [3,]  0.8044958 -0.40415639 -0.4352518</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $device</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "cpu"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> attr(,"class")</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "cuda_svd"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> &lt;cuda_svd rank=3 device=cpu compute=cpu backend=base&gt;</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

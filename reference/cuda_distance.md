@@ -44,4 +44,43 @@ cuda_distance(matrix(1:12, 4, 3), device = "cpu")
 #> [4,] 5.196152 3.464102 1.732051 0.000000
 #> attr(,"device")
 #> [1] "cpu"
+#> attr(,"provenance_schema")
+#> [1] "cudaverse-stage/1"
+#> attr(,"requested_device")
+#> [1] "cpu"
+#> attr(,"compute_device")
+#> [1] "cpu"
+#> attr(,"compute_stages")
+#> attr(,"compute_stages")$distance
+#> $requested_device
+#> [1] "cpu"
+#> 
+#> $device
+#> [1] "cpu"
+#> 
+#> $backend
+#> [1] "base"
+#> 
+#> $selection_reason
+#> [1] "explicit_cpu"
+#> 
+#> $fallback
+#> [1] FALSE
+#> 
+#> $output_device
+#> [1] "cpu"
+#> 
+#> attr(,"class")
+#> [1] "cuda_stage"
+#> 
+#> attr(,"backend")
+#> [1] "base"
+#> attr(,"parameters")
+#> attr(,"parameters")$metric
+#> [1] "euclidean"
+#> 
+#> attr(,"source_device")
+#> [1] "cpu"
+#> attr(,"source_class")
+#> [1] "matrix"
 ```
