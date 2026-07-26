@@ -13,6 +13,11 @@
   )
 }
 
+test_that("provenance inspection re-exports the canonical generic", {
+  expect_identical(cuda_provenance, cudatensr::cuda_provenance)
+  expect_true(utils::isS3stdGeneric(cuda_provenance))
+})
+
 test_that("all numerical result types expose one provenance schema", {
   x <- .provenance_matrix()
 

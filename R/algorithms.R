@@ -121,17 +121,9 @@
   if (inherits(x, "cudatensor")) x$device else "cpu"
 }
 
-#' Inspect actual compute provenance
-#'
-#' This is the shared [cudatensr::cuda_provenance()] inspector, re-exposed for
-#' numerical-learning results.
-#'
-#' @param x A cudaverse result or named list of compute stages.
-#' @return A `cuda_provenance` data frame.
+#' @importFrom cudatensr cuda_provenance
 #' @export
-cuda_provenance <- function(x) {
-  cudatensr::cuda_provenance(x)
-}
+cudatensr::cuda_provenance
 
 .learn_flag <- function(value, argument) {
   if (!is.logical(value) || length(value) != 1L || is.na(value)) {

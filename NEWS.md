@@ -1,5 +1,8 @@
 # cudalearnr 0.2.0
 
+- `cuda_provenance()` now re-exports the canonical cudatensr S3 generic
+  instead of wrapping it, so methods registered by other cudaverse packages
+  remain available regardless of package attachment order.
 - Fitted `cuda_pca` and `cuda_kmeans` objects now support standard
   `predict()` workflows for new observations. Prediction aligns named features
   safely, accepts a single observation, preserves identifiers, supports
