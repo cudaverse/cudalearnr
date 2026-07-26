@@ -97,7 +97,7 @@ Without CUDA, the same APIs use base R and `stats`.
 Every result records the requested device, actual stage devices,
 concrete backend, output device, and any automatic fallback. Inspect
 those fields as a table with
-[`cuda_provenance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_provenance.md):
+[`cuda_provenance()`](https://cudaverse.github.io/cudatensr/reference/cuda_provenance.html):
 
 ``` r
 
@@ -217,8 +217,9 @@ MIT © Yaoxiang Li
 
 ## Provenance
 
-- [`cuda_provenance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_provenance.md)
-  : Inspect actual compute provenance
+- [`reexports`](https://cudaverse.github.io/cudalearnr/reference/reexports.md)
+  [`cuda_provenance`](https://cudaverse.github.io/cudalearnr/reference/reexports.md)
+  : Objects exported from other packages
 
 # Articles
 

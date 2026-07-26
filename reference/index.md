@@ -25,5 +25,6 @@
 
 ## Provenance
 
-- [`cuda_provenance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_provenance.md)
-  : Inspect actual compute provenance
+- [`reexports`](https://cudaverse.github.io/cudalearnr/reference/reexports.md)
+  [`cuda_provenance`](https://cudaverse.github.io/cudalearnr/reference/reexports.md)
+  : Objects exported from other packages

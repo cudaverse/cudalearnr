@@ -35,7 +35,9 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.2.0" id="cudalearnr-020">cudalearnr 0.2.0<a class="anchor" aria-label="anchor" href="#cudalearnr-020"></a></h2>
-<ul><li>Fitted <code>cuda_pca</code> and <code>cuda_kmeans</code> objects now support standard <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> workflows for new observations. Prediction aligns named features safely, accepts a single observation, preserves identifiers, supports explicit CPU/CUDA selection, and records the projection or assignment stages.</li>
+<ul><li>
+<code><a href="https://cudaverse.github.io/cudatensr/reference/cuda_provenance.html" class="external-link">cuda_provenance()</a></code> now re-exports the canonical cudatensr S3 generic instead of wrapping it, so methods registered by other cudaverse packages remain available regardless of package attachment order.</li>
+<li>Fitted <code>cuda_pca</code> and <code>cuda_kmeans</code> objects now support standard <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> workflows for new observations. Prediction aligns named features safely, accepts a single observation, preserves identifiers, supports explicit CPU/CUDA selection, and records the projection or assignment stages.</li>
 <li>Prediction with <code>device = "model"</code> now records an inherited model-device decision instead of misreporting an explicit CPU or CUDA request. Stored training scores and assignments are validated before retrieval and are documented separately from recomputed predictions.</li>
 <li>
 <code><a href="../reference/cuda_distance.html">cuda_distance()</a></code> now accepts one-row inputs, enabling single-observation scoring without special casing.</li>

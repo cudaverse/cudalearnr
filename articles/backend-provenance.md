@@ -120,7 +120,7 @@ cuda_provenance(assigned)
 #>            cpu
 ```
 
-[`cuda_provenance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_provenance.md)
+[`cuda_provenance()`](https://cudaverse.github.io/cudatensr/reference/cuda_provenance.html)
 returns one row per stage. Its columns have deliberately different
 meanings:
 

@@ -113,10 +113,10 @@
 <h2 id="backend-semantics">Backend semantics<a class="anchor" aria-label="anchor" href="#backend-semantics"></a>
 </h2>
 <p>When a CUDA-enabled R torch installation is available, SVD/PCA, pairwise distances, and kNN distance blocks execute through libtorch on the GPU. k-means uses GPU distance calculations while updating centres in R. Without CUDA, the same APIs use base R and <code>stats</code>.</p>
-<p>Every result records the requested device, actual stage devices, concrete backend, output device, and any automatic fallback. Inspect those fields as a table with <code><a href="reference/cuda_provenance.html">cuda_provenance()</a></code>:</p>
+<p>Every result records the requested device, actual stage devices, concrete backend, output device, and any automatic fallback. Inspect those fields as a table with <code><a href="https://cudaverse.github.io/cudatensr/reference/cuda_provenance.html" class="external-link">cuda_provenance()</a></code>:</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">cudatensr</span><span class="fu">::</span><span class="fu"><a href="https://cudaverse.github.io/cudatensr/reference/cuda_diagnostics.html" class="external-link">cuda_diagnostics</a></span><span class="op">(</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/cuda_provenance.html">cuda_provenance</a></span><span class="op">(</span><span class="va">pca</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://cudaverse.github.io/cudatensr/reference/cuda_provenance.html" class="external-link">cuda_provenance</a></span><span class="op">(</span><span class="va">pca</span><span class="op">)</span></span></code></pre></div>
 <table class="table">
 <colgroup>
 <col width="25%">
