@@ -29,6 +29,115 @@ test_that("PCA matches prcomp variance and dimensions", {
   expect_identical(names(fit$sdev), c("PC1", "PC2"))
 })
 
+test_that("fitted PCA models project new observations safely", {
+  train <- test_matrix()
+  colnames(train) <- paste0("feature_", seq_len(ncol(train)))
+  rownames(train) <- paste0("train_", seq_len(nrow(train)))
+  newdata <- train[c(2L, 5L), , drop = FALSE] + 0.25
+  rownames(newdata) <- c("new_a", "new_b")
+
+  fit <- cuda_pca(
+    train,
+    n_components = 2,
+    center = TRUE,
+    scale. = TRUE,
+    device = "cpu"
+  )
+  expected <- sweep(newdata, 2L, fit$center, "-")
+  expected <- sweep(expected, 2L, fit$scale, "/") %*% fit$rotation
+  projected <- predict(
+    fit,
+    newdata[, rev(colnames(newdata)), drop = FALSE],
+    device = "cpu"
+  )
+
+  expect_equal(as.vector(projected), as.vector(expected), tolerance = 1e-12)
+  expect_identical(
+    dimnames(projected),
+    list(rownames(newdata), c("PC1", "PC2"))
+  )
+  expect_identical(attr(projected, "device"), "cpu")
+  expect_identical(predict(fit), fit$x)
+})
+
+test_that("PCA prediction validates the model and feature identity", {
+  x <- test_matrix()
+  colnames(x) <- c("a", "b", "c")
+  fit <- cuda_pca(x, n_components = 2, device = "cpu")
+  newdata <- x[1L, , drop = FALSE]
+
+  expect_error(
+    predict(fit, unname(newdata), device = "cpu"),
+    "must have column names"
+  )
+  colnames(newdata) <- c("a", "b", "other")
+  expect_error(
+    predict(fit, newdata, device = "cpu"),
+    "missing: c; unexpected: other"
+  )
+  expect_error(
+    predict(fit, x[1L, 1:2, drop = FALSE], device = "cpu"),
+    "exactly 3 model features"
+  )
+  expect_error(
+    predict(fit, x[1L, , drop = FALSE], typo = TRUE),
+    "Unused argument"
+  )
+
+  broken <- fit
+  broken$scale <- 0
+  expect_error(
+    predict(broken, x[1L, , drop = FALSE], device = "cpu"),
+    "invalid `\\$scale`"
+  )
+
+  broken <- fit
+  broken$device <- "accelerator"
+  expect_error(
+    predict(broken, x[1L, , drop = FALSE], device = "cpu"),
+    "valid `\\$device`"
+  )
+
+  broken <- fit
+  rownames(broken$rotation)[1L] <- NA_character_
+  expect_error(
+    predict(broken, x[1L, , drop = FALSE], device = "cpu"),
+    "invalid feature names"
+  )
+
+  broken <- fit
+  names(broken$center) <- rev(names(broken$center))
+  expect_error(
+    predict(broken, x[1L, , drop = FALSE], device = "cpu"),
+    "names do not match"
+  )
+})
+
+test_that("PCA retrieval validates stored training scores", {
+  fit <- cuda_pca(test_matrix(), n_components = 2, device = "cpu")
+
+  broken <- fit
+  broken$x[1L, 1L] <- Inf
+  expect_error(
+    predict(broken),
+    "invalid stored training scores"
+  )
+
+  broken <- fit
+  broken$x <- broken$x[, 1L, drop = FALSE]
+  expect_error(
+    predict(broken),
+    "invalid stored training scores"
+  )
+
+  broken <- fit
+  colnames(broken$x) <- c("wrong_1", "wrong_2")
+  expect_error(
+    predict(broken),
+    "invalid stored training scores"
+  )
+})
+
 test_that("algorithms preserve observation and feature identifiers", {
   x <- test_matrix()
   rownames(x) <- paste0("cell_", seq_len(nrow(x)))
@@ -74,6 +183,71 @@ test_that("distance supports Euclidean and cosine metrics", {
   expect_equal(euclidean, as.matrix(stats::dist(x)), tolerance = 1e-10,
                ignore_attr = TRUE)
   expect_equal(diag(cosine), rep(0, nrow(x)), tolerance = 1e-10)
+})
+
+test_that("distance supports a single query observation", {
+  x <- matrix(c(1, 2, 3), nrow = 1)
+  y <- matrix(c(1, 2, 4, 3, 2, 1), nrow = 2, byrow = TRUE)
+
+  between <- cuda_distance(x, y, device = "cpu")
+  self <- cuda_distance(x, device = "cpu")
+
+  expect_identical(dim(between), c(1L, 2L))
+  expect_equal(as.vector(between), c(1, sqrt(8)), tolerance = 1e-12)
+  expect_identical(dim(self), c(1L, 1L))
+  expect_equal(as.vector(self), 0)
+})
+
+test_that("CPU Euclidean distance is stable for large offsets and magnitudes", {
+  centers <- matrix(1e8 + c(0, 1), ncol = 1)
+  query <- matrix(1e8 + 0.9, nrow = 1)
+  offset_distance <- cuda_distance(query, centers, device = "cpu")
+
+  expect_true(all(as.vector(offset_distance) > 0))
+  expect_equal(
+    as.vector(offset_distance),
+    c(0.9, 0.1),
+    tolerance = 1e-7
+  )
+
+  huge <- cuda_distance(
+    matrix(c(1e300, 1e300), nrow = 1),
+    matrix(c(0, 0), nrow = 1),
+    device = "cpu"
+  )
+  tiny <- cuda_distance(
+    matrix(c(1e-300, 1e-300), nrow = 1),
+    matrix(c(0, 0), nrow = 1),
+    device = "cpu"
+  )
+  expect_true(is.finite(huge[[1L]]))
+  expect_equal(huge[[1L]], sqrt(2) * 1e300, tolerance = 1e-12)
+  expect_equal(tiny[[1L]], sqrt(2) * 1e-300, tolerance = 1e-12)
+})
+
+test_that("CPU Euclidean distance repairs risky pairs after extreme scaling", {
+  largest <- .Machine$double.xmax
+  x <- rbind(
+    extreme = c(-largest, 0),
+    tiny = c(1e-300, 1e-300)
+  )
+  y <- rbind(
+    opposite = c(largest, 0),
+    zero = c(0, 0)
+  )
+  distance <- cuda_distance(x, y, device = "cpu")
+
+  expect_true(is.infinite(distance["extreme", "opposite"]))
+  expect_equal(distance["tiny", "zero"], sqrt(2) * 1e-300, tolerance = 1e-12)
+
+  dimensions <- 10000L
+  high_dimensional <- cuda_distance(
+    matrix(rep(1e300, dimensions), nrow = 1L),
+    matrix(rep(0, dimensions), nrow = 1L),
+    device = "cpu"
+  )
+  expect_true(is.finite(high_dimensional[[1L]]))
+  expect_equal(high_dimensional[[1L]], 1e302, tolerance = 1e-12)
 })
 
 test_that("cosine distance rejects zero rows before backend dispatch", {
@@ -229,6 +403,24 @@ test_that("kNN ties and self exclusion are deterministic", {
   expect_false(any(duplicate_fit$index == row(duplicate_fit$index)))
 })
 
+test_that("CPU kNN preserves close distances on a large offset", {
+  x <- matrix(1e8 + c(0, 0.9, 1), ncol = 1)
+  fit <- cuda_knn(
+    x,
+    k = 1,
+    device = "cpu",
+    batch_size = 2
+  )
+
+  expect_identical(as.vector(fit$index), c(2L, 3L, 2L))
+  expect_equal(
+    as.vector(fit$distance),
+    c(0.9, 0.1, 0.1),
+    tolerance = 1e-7
+  )
+  expect_true(all(fit$distance > 0))
+})
+
 test_that("kNN validates batch sizes and cosine rows clearly", {
   x <- test_matrix()
 
@@ -279,6 +471,232 @@ test_that("k-means returns coherent clusters", {
   expect_length(fit$cluster, 40)
   expect_identical(dim(fit$centers), c(2L, 2L))
   expect_true(all(fit$cluster %in% 1:2))
+})
+
+test_that("CPU k-means separates close groups on a large offset", {
+  x <- matrix(1e8 + c(0, 0.1, 0.9, 1), ncol = 1)
+  initial <- matrix(1e8 + c(0, 1), ncol = 1)
+  fit <- cuda_kmeans(
+    x,
+    centers = initial,
+    device = "cpu"
+  )
+
+  expect_identical(as.vector(fit$cluster), c(1L, 1L, 2L, 2L))
+  expect_equal(
+    as.vector(fit$centers),
+    1e8 + c(0.05, 0.95),
+    tolerance = 1e-7
+  )
+  expect_true(all(fit$withinss > 0))
+})
+
+test_that("fitted k-means models assign new observations safely", {
+  x <- test_matrix()
+  colnames(x) <- c("a", "b", "c")
+  rownames(x) <- paste0("train_", seq_len(nrow(x)))
+  fit <- cuda_kmeans(x, centers = 2, seed = 1, device = "cpu")
+  newdata <- rbind(
+    new_a = fit$centers[1L, ] + 0.01,
+    new_b = fit$centers[2L, ] - 0.01
+  )
+
+  distances <- predict(
+    fit,
+    newdata[, c("c", "a", "b"), drop = FALSE],
+    type = "distance",
+    device = "cpu"
+  )
+  clusters <- predict(
+    fit,
+    newdata[, c("c", "a", "b"), drop = FALSE],
+    device = "cpu"
+  )
+
+  expect_identical(dim(distances), c(2L, 2L))
+  expect_identical(
+    dimnames(distances),
+    list(rownames(newdata), rownames(fit$centers))
+  )
+  expect_identical(as.vector(clusters), c(1L, 2L))
+  expect_identical(names(clusters), rownames(newdata))
+  expect_identical(predict(fit), fit$cluster)
+})
+
+test_that("k-means prediction handles one row and rejects ambiguity", {
+  x <- test_matrix()
+  colnames(x) <- c("a", "b", "c")
+  fit <- cuda_kmeans(x, centers = 2, seed = 1, device = "cpu")
+  one <- x[1L, , drop = FALSE]
+
+  expect_length(predict(fit, one, device = "cpu"), 1L)
+  expect_identical(
+    dim(predict(fit, one, type = "distance", device = "cpu")),
+    c(1L, 2L)
+  )
+  expect_error(
+    predict(fit, type = "distance"),
+    "`newdata` is required"
+  )
+  expect_error(
+    predict(fit, unname(one), device = "cpu"),
+    "must have column names"
+  )
+  colnames(one) <- c("a", "b", "other")
+  expect_error(
+    predict(fit, one, device = "cpu"),
+    "feature names do not match"
+  )
+
+  broken <- fit
+  broken$centers[1L, 1L] <- NA_real_
+  expect_error(
+    predict(broken, x[1L, , drop = FALSE], device = "cpu"),
+    "invalid centres"
+  )
+
+  broken <- fit
+  broken$device <- NA_character_
+  expect_error(
+    predict(broken, x[1L, , drop = FALSE], device = "cpu"),
+    "valid `\\$device`"
+  )
+
+  broken <- fit
+  colnames(broken$centers)[1L] <- NA_character_
+  expect_error(
+    predict(broken, x[1L, , drop = FALSE], device = "cpu"),
+    "invalid feature names"
+  )
+})
+
+test_that("k-means retrieval validates stored training assignments", {
+  fit <- cuda_kmeans(
+    test_matrix(),
+    centers = 2,
+    seed = 1,
+    device = "cpu"
+  )
+
+  broken <- fit
+  broken$cluster <- as.numeric(broken$cluster)
+  expect_error(
+    predict(broken),
+    "invalid stored assignments"
+  )
+
+  broken <- fit
+  broken$cluster[1L] <- 0L
+  expect_error(
+    predict(broken),
+    "invalid stored assignments"
+  )
+
+  broken <- fit
+  broken$cluster <- integer()
+  expect_error(
+    predict(broken),
+    "invalid stored assignments"
+  )
+})
+
+test_that("saved CUDA models can be predicted explicitly on CPU", {
+  x <- test_matrix()
+  colnames(x) <- c("a", "b", "c")
+  newdata <- x[1:2, , drop = FALSE]
+
+  cpu_pca <- cuda_pca(x, n_components = 2, device = "cpu")
+  saved_cuda_pca <- cpu_pca
+  saved_cuda_pca$device <- "cuda"
+  pca_override <- predict(saved_cuda_pca, newdata, device = "cpu")
+  expect_equal(
+    as.vector(pca_override),
+    as.vector(predict(cpu_pca, newdata, device = "cpu")),
+    tolerance = 1e-12
+  )
+  expect_identical(
+    cuda_provenance(pca_override)$requested_device,
+    "cpu"
+  )
+  expect_identical(
+    cuda_provenance(pca_override)$selection_reason,
+    "explicit_cpu"
+  )
+
+  cpu_kmeans <- cuda_kmeans(x, centers = 2, seed = 1, device = "cpu")
+  saved_cuda_kmeans <- cpu_kmeans
+  saved_cuda_kmeans$device <- "cuda"
+  kmeans_override <- predict(saved_cuda_kmeans, newdata, device = "cpu")
+  expect_identical(
+    as.vector(kmeans_override),
+    as.vector(predict(cpu_kmeans, newdata, device = "cpu"))
+  )
+  expect_identical(
+    cuda_provenance(kmeans_override)$requested_device,
+    c("cpu", "fixed-cpu")
+  )
+  expect_identical(
+    cuda_provenance(kmeans_override)$selection_reason,
+    c("explicit_cpu", "algorithm_cpu_only")
+  )
+})
+
+test_that("CUDA predictions agree with CPU predictions", {
+  skip_if_not(cudatensr::cuda_available())
+  x <- test_matrix()
+  colnames(x) <- c("a", "b", "c")
+  rownames(x) <- paste0("row_", seq_len(nrow(x)))
+  newdata <- x[1:2, c("c", "a", "b"), drop = FALSE]
+
+  pca <- cuda_pca(x, n_components = 2, device = "cpu")
+  cpu_pca <- predict(pca, newdata, device = "cpu")
+  gpu_pca <- predict(pca, newdata, device = "cuda")
+  expect_equal(
+    as.vector(gpu_pca),
+    as.vector(cpu_pca),
+    tolerance = 1e-8
+  )
+  expect_identical(attr(gpu_pca, "device"), "cuda")
+
+  kmeans <- cuda_kmeans(x, centers = 2, seed = 1, device = "cpu")
+  cpu_cluster <- predict(kmeans, newdata, device = "cpu")
+  gpu_cluster <- predict(kmeans, newdata, device = "cuda")
+  expect_identical(as.vector(gpu_cluster), as.vector(cpu_cluster))
+  expect_identical(attr(gpu_cluster, "device"), "cuda")
+
+  cuda_pca_model <- cuda_pca(x, n_components = 2, device = "cuda")
+  inherited_pca <- predict(cuda_pca_model, newdata)
+  explicit_pca <- predict(cuda_pca_model, newdata, device = "cuda")
+  expect_equal(
+    as.vector(inherited_pca),
+    as.vector(explicit_pca),
+    tolerance = 1e-8
+  )
+  expect_identical(
+    cuda_provenance(inherited_pca)$requested_device,
+    "inherited"
+  )
+
+  cuda_kmeans_model <- cuda_kmeans(
+    x,
+    centers = 2,
+    seed = 1,
+    device = "cuda"
+  )
+  inherited_cluster <- predict(cuda_kmeans_model, newdata)
+  explicit_cluster <- predict(
+    cuda_kmeans_model,
+    newdata,
+    device = "cuda"
+  )
+  expect_identical(
+    as.vector(inherited_cluster),
+    as.vector(explicit_cluster)
+  )
+  expect_identical(
+    cuda_provenance(inherited_cluster)$requested_device,
+    c("inherited", "fixed-cpu")
+  )
 })
 
 test_that("k-means final assignments and sums match returned centers", {

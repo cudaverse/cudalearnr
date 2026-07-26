@@ -44,6 +44,8 @@ The implementation constructs at most a
 \code{min(batch_size, nrow(x))}-by-\code{nrow(x)} dense distance block instead of a
 complete pairwise distance matrix. On CUDA, distance blocks are computed
 with torch and transferred to the CPU for deterministic neighbour ordering.
+On CPU, Euclidean blocks use the same guarded translated-and-scaled
+implementation as \code{\link[=cuda_distance]{cuda_distance()}}.
 }
 \examples{
 cuda_knn(

@@ -62,6 +62,87 @@ test_that("all numerical result types expose one provenance schema", {
   expect_identical(kmeans$backend, "base")
 })
 
+test_that("post-fit predictions expose their actual compute stages", {
+  x <- .provenance_matrix()
+  colnames(x) <- paste0("feature_", seq_len(ncol(x)))
+  rownames(x) <- paste0("row_", seq_len(nrow(x)))
+  newdata <- x[1:2, rev(colnames(x)), drop = FALSE]
+
+  pca <- cuda_pca(x, n_components = 2, device = "cpu")
+  projected <- predict(pca, newdata, device = "cpu")
+  projected_provenance <- cuda_provenance(projected)
+  expect_identical(projected_provenance$stage, "projection")
+  expect_identical(projected_provenance$device, "cpu")
+  expect_identical(attr(projected, "compute_device"), "cpu")
+  expect_identical(attr(projected, "backend"), "base")
+  expect_identical(
+    attr(projected, "parameters"),
+    list(n_components = 2L)
+  )
+  expect_identical(attr(projected, "source_class"), "matrix")
+
+  kmeans <- cuda_kmeans(x, centers = 2, seed = 1, device = "cpu")
+  assigned <- predict(kmeans, newdata, device = "cpu")
+  assigned_provenance <- cuda_provenance(assigned)
+  expect_identical(
+    assigned_provenance$stage,
+    c("distance", "assignment")
+  )
+  expect_identical(assigned_provenance$device, c("cpu", "cpu"))
+  expect_identical(attr(assigned, "compute_device"), "cpu")
+  expect_identical(attr(assigned, "backend"), "base")
+  expect_identical(
+    attr(assigned, "parameters"),
+    list(type = "cluster", metric = "euclidean")
+  )
+
+  projected_from_model <- predict(pca, newdata)
+  projected_model_provenance <- cuda_provenance(projected_from_model)
+  expect_identical(
+    projected_model_provenance$requested_device,
+    "inherited"
+  )
+  expect_identical(
+    projected_model_provenance$selection_reason,
+    "model_device"
+  )
+  expect_false(projected_model_provenance$fallback)
+  expect_identical(
+    attr(projected_from_model, "requested_device"),
+    "inherited"
+  )
+
+  assigned_from_model <- predict(kmeans, newdata)
+  assigned_model_provenance <- cuda_provenance(assigned_from_model)
+  expect_identical(
+    assigned_model_provenance$requested_device,
+    c("inherited", "fixed-cpu")
+  )
+  expect_identical(
+    assigned_model_provenance$selection_reason,
+    c("model_device", "algorithm_cpu_only")
+  )
+  expect_false(any(assigned_model_provenance$fallback))
+  expect_identical(
+    attr(assigned_from_model, "requested_device"),
+    "inherited"
+  )
+
+  model_distances <- predict(kmeans, newdata, type = "distance")
+  distance_model_provenance <- cuda_provenance(model_distances)
+  expect_identical(
+    distance_model_provenance$requested_device,
+    "inherited"
+  )
+  expect_identical(
+    distance_model_provenance$selection_reason,
+    "model_device"
+  )
+
+  expect_null(attr(predict(pca), "compute_stages", exact = TRUE))
+  expect_null(attr(predict(kmeans), "compute_stages", exact = TRUE))
+})
+
 test_that("automatic fallback is visible and explicit CUDA remains strict", {
   unavailable <- structure(
     list(

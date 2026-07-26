@@ -59,6 +59,16 @@ clusters <- cuda_kmeans(
   seed = 1,
   device = "cpu"
 )
+projected <- predict(
+  pca,
+  x[1:3, , drop = FALSE],
+  device = "cpu"
+)
+assigned <- predict(
+  clusters,
+  projected,
+  device = "cpu"
+)
 ```
 
 The numerical results remain ordinary R objects. Provenance is separate,
@@ -70,6 +80,8 @@ cuda_provenance(pca)
 cuda_provenance(distance)
 cuda_provenance(neighbors)
 cuda_provenance(clusters)
+cuda_provenance(projected)
+cuda_provenance(assigned)
 ```
 
 `cuda_provenance()` returns one row per stage. Its columns have deliberately
@@ -112,11 +124,53 @@ The following table describes successful CPU and explicit CUDA requests.
 | `cuda_kmeans()` | `distance` | `base` | `torch` | CPU distance matrix |
 | `cuda_kmeans()` | `assignment` | `base` | `base` | CPU |
 | `cuda_kmeans()` | `center_update` | `base` | `base` | CPU R list |
+| `predict(cuda_pca)` | `projection` | `base` | `torch` | CPU matrix |
+| `predict(cuda_kmeans)` | `distance` | `base` | `torch` | CPU matrix |
+| `predict(cuda_kmeans)` | `assignment` | `base` | `base` | CPU vector |
 
 Thus SVD, PCA, and distance have a CUDA aggregate when explicitly run on CUDA.
 kNN and k-means are intentionally hybrid: CUDA accelerates distance
 calculation, while deterministic selection, assignments, and centre updates
 remain in R on the CPU.
+
+## Reuse fitted models on new observations
+
+Fitting is only half of a reusable analysis. Standard `predict()` methods apply
+the learned PCA transformation or fitted k-means centres without refitting:
+
+```{r prediction}
+new_observations <- x[1:2, rev(colnames(x)), drop = FALSE]
+new_scores <- predict(
+  pca,
+  new_observations,
+  device = "cpu"
+)
+new_clusters <- predict(
+  clusters,
+  new_scores,
+  device = "cpu"
+)
+
+new_scores
+new_clusters
+```
+
+The reversed columns above are intentional. When a model was fitted with
+feature names, prediction aligns the same unique names automatically. It fails
+clearly for missing, unexpected, or unnamed features instead of silently
+projecting values in the wrong order. If duplicated feature names were used
+for fitting, prediction requires the exact original order because a safe
+reordering would be ambiguous.
+
+Omitting `newdata` returns the stored training scores or assignments. Set
+`type = "distance"` for k-means to receive the complete
+observation-by-centre distance matrix. Both prediction methods accept one
+observation and reuse the model's actual device by default; `device = "cpu"`,
+`"cuda"`, or `"auto"` can override that choice explicitly. In particular,
+`device = "cpu"` makes a saved CUDA-fitted model portable to a machine without
+a CUDA runtime. Stored-value retrieval validates the stored scores or
+assignments but does not perform computation or attach a new prediction stage;
+only recomputed predictions have prediction provenance.
 
 If a CUDA `cudatensor` must first be materialized as an R matrix, provenance
 also includes an `input_materialization` stage. This makes a device transfer
@@ -140,6 +194,9 @@ Device requests follow these rules:
 - `"auto"` uses CUDA when diagnostics report a usable device. Otherwise it
   selects CPU and records `fallback = TRUE` plus a stable reason such as
   `torch_not_installed` or `cuda_unavailable`.
+- Prediction's `"model"` choice reuses the fitted object's actual device and
+  records `requested_device = "inherited"` with
+  `selection_reason = "model_device"`.
 - Once CUDA has been selected, an execution error is reported as an error. It
   is not retried silently on CPU.
 
@@ -182,7 +239,11 @@ observations or features before PCA when the dense representation is too
 large.
 
 `cuda_distance()` intentionally returns the complete dense pairwise matrix,
-requiring about `8 * nrow(x) * nrow(y)` bytes for doubles.
+requiring about `8 * nrow(x) * nrow(y)` bytes for doubles. Its CPU Euclidean
+path applies a common translation and global scaling before a vectorized
+calculation, then recomputes numerically risky pairs from direct, scale-first
+differences. This avoids cancellation from large squared norms and avoids
+avoidable overflow or underflow.
 
 `cuda_knn()` is exact and quadratic in time, but `batch_size` bounds its
 resident distance block to approximately

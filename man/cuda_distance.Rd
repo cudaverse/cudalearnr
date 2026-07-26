@@ -26,6 +26,14 @@ observation names are retained as row and column names when present.
 \description{
 Pairwise distances with an optional CUDA backend
 }
+\details{
+On CPU, Euclidean distances use a common translation and global
+scaling before a vectorized calculation. Pairs at risk of cancellation or
+non-finite intermediate results are recomputed from direct observation
+differences with a scale-first norm. This avoids cancellation from large
+shared offsets and avoids avoidable overflow and underflow for extreme
+finite values.
+}
 \examples{
 cuda_distance(matrix(1:12, 4, 3), device = "cpu")
 }

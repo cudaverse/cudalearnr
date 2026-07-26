@@ -158,6 +158,248 @@ cuda_provenance <- function(x) {
   structure(result, class = "cuda_pca")
 }
 
+.learn_prediction_selection <- function(device, object_device) {
+  device <- match.arg(device, c("model", "auto", "cuda", "cpu"))
+  if (!identical(device, "model")) {
+    return(.learn_device(device))
+  }
+  if (!is.character(object_device) || length(object_device) != 1L ||
+      is.na(object_device) || !object_device %in% c("cuda", "cpu")) {
+    stop(
+      "The fitted object does not contain a valid `$device` value.",
+      call. = FALSE
+    )
+  }
+  selection <- .learn_device(object_device)
+  selection$requested_device <- "inherited"
+  selection$selection_reason <- "model_device"
+  selection$fallback <- FALSE
+  selection
+}
+
+.learn_feature_summary <- function(x, limit = 5L) {
+  shown <- utils::head(x, limit)
+  suffix <- if (length(x) > limit) {
+    sprintf(" ... (%s more)", length(x) - limit)
+  } else {
+    ""
+  }
+  paste0(paste(shown, collapse = ", "), suffix)
+}
+
+.learn_prediction_matrix <- function(newdata, feature_names, n_features) {
+  values <- if (inherits(newdata, "cudatensor")) {
+    newdata
+  } else {
+    as.matrix(newdata)
+  }
+  values <- .learn_matrix(
+    values,
+    argument = "newdata",
+    min_rows = 1L,
+    min_cols = 1L
+  )
+
+  if (ncol(values) != n_features) {
+    stop(
+      sprintf(
+        "`newdata` must contain exactly %s model feature%s; it has %s.",
+        n_features,
+        if (n_features == 1L) "" else "s",
+        ncol(values)
+      ),
+      call. = FALSE
+    )
+  }
+  if (is.null(feature_names)) {
+    return(values)
+  }
+  if (anyNA(feature_names) || length(feature_names) != n_features) {
+    stop("The fitted object contains invalid feature names.", call. = FALSE)
+  }
+
+  new_names <- colnames(values)
+  if (is.null(new_names)) {
+    stop(
+      paste0(
+        "`newdata` must have column names because the model was fitted ",
+        "with named features."
+      ),
+      call. = FALSE
+    )
+  }
+  if (anyNA(new_names)) {
+    stop("`newdata` contains invalid column names.", call. = FALSE)
+  }
+  if (identical(new_names, feature_names)) {
+    return(values)
+  }
+  if (anyDuplicated(feature_names) || anyDuplicated(new_names)) {
+    stop(
+      paste0(
+        "Duplicated feature names must match the fitted model exactly and ",
+        "in the same order."
+      ),
+      call. = FALSE
+    )
+  }
+
+  missing_features <- setdiff(feature_names, new_names)
+  extra_features <- setdiff(new_names, feature_names)
+  if (length(missing_features) || length(extra_features)) {
+    details <- c(
+      if (length(missing_features)) {
+        paste0("missing: ", .learn_feature_summary(missing_features))
+      },
+      if (length(extra_features)) {
+        paste0("unexpected: ", .learn_feature_summary(extra_features))
+      }
+    )
+    stop(
+      paste0(
+        "`newdata` feature names do not match the fitted model (",
+        paste(details, collapse = "; "),
+        ")."
+      ),
+      call. = FALSE
+    )
+  }
+
+  values[, match(feature_names, new_names), drop = FALSE]
+}
+
+.learn_check_prediction_dots <- function(...) {
+  dots <- list(...)
+  if (!length(dots)) {
+    return(invisible(NULL))
+  }
+  dot_names <- names(dots)
+  if (is.null(dot_names)) {
+    dot_names <- rep("", length(dots))
+  }
+  dot_names[!nzchar(dot_names)] <- "<unnamed>"
+  stop(
+    paste0("Unused argument", if (length(dots) == 1L) "" else "s",
+           " in `...`: ", paste(dot_names, collapse = ", "), "."),
+    call. = FALSE
+  )
+}
+
+.learn_validate_model_device <- function(object) {
+  if (!is.character(object$device) || length(object$device) != 1L ||
+      is.na(object$device) || !object$device %in% c("cuda", "cpu")) {
+    stop(
+      "The fitted object does not contain a valid `$device` value.",
+      call. = FALSE
+    )
+  }
+  invisible(object$device)
+}
+
+.learn_validate_pca <- function(object) {
+  .learn_validate_model_device(object)
+  rotation <- object$rotation
+  if (!is.matrix(rotation) || !is.numeric(rotation) ||
+      nrow(rotation) < 1L || ncol(rotation) < 1L ||
+      anyNA(rotation) || any(!is.finite(rotation))) {
+    stop("The fitted PCA object contains invalid loadings.", call. = FALSE)
+  }
+  feature_names <- rownames(rotation)
+  if (!is.null(feature_names) && anyNA(feature_names)) {
+    stop(
+      "The fitted PCA object contains invalid feature names.",
+      call. = FALSE
+    )
+  }
+  component_names <- colnames(rotation)
+  if (is.null(component_names) || anyNA(component_names) ||
+      anyDuplicated(component_names)) {
+    stop(
+      "The fitted PCA object contains invalid component names.",
+      call. = FALSE
+    )
+  }
+  for (field in c("center", "scale")) {
+    value <- object[[field]]
+    valid <- identical(value, FALSE) ||
+      (is.numeric(value) && length(value) == nrow(rotation) &&
+       !anyNA(value) && all(is.finite(value)))
+    if (!valid || (identical(field, "scale") && is.numeric(value) &&
+                   any(value <= 0))) {
+      stop(
+        sprintf("The fitted PCA object contains an invalid `$%s` value.", field),
+        call. = FALSE
+      )
+    }
+    if (is.numeric(value) && !identical(names(value), feature_names)) {
+      stop(
+        sprintf(
+          "The fitted PCA object's `$%s` names do not match its features.",
+          field
+        ),
+        call. = FALSE
+      )
+    }
+  }
+  invisible(rotation)
+}
+
+.learn_validate_pca_scores <- function(object) {
+  scores <- object$x
+  component_names <- colnames(object$rotation)
+  if (!is.matrix(scores) || !is.numeric(scores) ||
+      nrow(scores) < 2L || ncol(scores) != ncol(object$rotation) ||
+      anyNA(scores) || any(!is.finite(scores)) ||
+      !identical(colnames(scores), component_names)) {
+    stop(
+      "The fitted PCA object contains invalid stored training scores.",
+      call. = FALSE
+    )
+  }
+  invisible(scores)
+}
+
+.learn_validate_kmeans <- function(object) {
+  .learn_validate_model_device(object)
+  centers <- object$centers
+  if (!is.matrix(centers) || !is.numeric(centers) ||
+      nrow(centers) < 1L || ncol(centers) < 1L ||
+      anyNA(centers) || any(!is.finite(centers))) {
+    stop("The fitted k-means object contains invalid centres.", call. = FALSE)
+  }
+  feature_names <- colnames(centers)
+  if (!is.null(feature_names) && anyNA(feature_names)) {
+    stop(
+      "The fitted k-means object contains invalid feature names.",
+      call. = FALSE
+    )
+  }
+  center_names <- rownames(centers)
+  if (!is.null(center_names) &&
+      (anyNA(center_names) || anyDuplicated(center_names))) {
+    stop(
+      "The fitted k-means object contains invalid centre names.",
+      call. = FALSE
+    )
+  }
+  invisible(centers)
+}
+
+.learn_validate_kmeans_clusters <- function(object) {
+  cluster <- object$cluster
+  number_of_centers <- nrow(object$centers)
+  valid <- is.integer(cluster) && length(cluster) >= 2L &&
+    !anyNA(cluster) &&
+    all(cluster >= 1L & cluster <= number_of_centers)
+  if (!valid) {
+    stop(
+      "The fitted k-means object contains invalid stored assignments.",
+      call. = FALSE
+    )
+  }
+  invisible(cluster)
+}
+
 .with_preserved_seed <- function(seed, code) {
   if (is.null(seed)) {
     return(force(code))
@@ -412,6 +654,209 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
   )
 }
 
+#' Project observations with a fitted CUDA-aware PCA model
+#'
+#' `predict.cuda_pca()` applies the fitted centring, scaling, and loadings to
+#' new observations. Named features may be supplied in any order and are
+#' aligned safely before projection. If the fitted model has feature names,
+#' unnamed or mismatched columns are rejected instead of being used in the
+#' wrong order.
+#'
+#' @param object A fitted `cuda_pca` object.
+#' @param newdata A finite numeric matrix or data frame with observations in
+#'   rows and the model features in columns. When omitted, the training scores
+#'   in `object$x` are returned.
+#' @param device Where to compute the projection. `"model"` reuses the actual
+#'   device of the fitted model; `"auto"`, `"cuda"`, and `"cpu"` follow the
+#'   usual cudaverse device-selection rules.
+#' @param ... Must be empty.
+#' @return A numeric matrix of component scores. New observation names and
+#'   stable component names are retained. A recomputed prediction includes
+#'   stage-level provenance and is materialized as an R matrix on the CPU.
+#'   Omitting `newdata` returns the validated stored training scores unchanged;
+#'   that retrieval does not create a prediction stage.
+#' @seealso [cuda_pca()]
+#' @method predict cuda_pca
+#' @export
+#' @examples
+#' train <- as.matrix(iris[1:100, 1:4])
+#' fit <- cuda_pca(train, n_components = 2, device = "cpu")
+#' predict(fit, as.matrix(iris[101:105, 1:4]), device = "cpu")
+predict.cuda_pca <- function(object, newdata, device = c(
+                               "model", "auto", "cuda", "cpu"
+                             ), ...) {
+  .learn_check_prediction_dots(...)
+  .learn_validate_pca(object)
+  if (missing(newdata)) {
+    .learn_validate_pca_scores(object)
+    return(object$x)
+  }
+
+  source_device <- .learn_source_device(newdata)
+  source_class <- class(newdata)[[1L]]
+  input_stage <- .learn_input_stage(newdata)
+  rotation <- object$rotation
+  values <- .learn_prediction_matrix(
+    newdata,
+    feature_names = rownames(rotation),
+    n_features = nrow(rotation)
+  )
+  selection <- .learn_prediction_selection(device, object$device)
+
+  if (identical(selection$device, "cuda")) {
+    transformed <- .torch_matrix(values)
+    if (is.numeric(object$center)) {
+      transformed <- transformed - .torch_matrix(matrix(
+        object$center,
+        nrow = 1L
+      ))
+    }
+    if (is.numeric(object$scale)) {
+      transformed <- transformed / .torch_matrix(matrix(
+        object$scale,
+        nrow = 1L
+      ))
+    }
+    scores <- .torch_array(transformed$matmul(.torch_matrix(rotation)))
+    scores <- matrix(
+      scores,
+      nrow = nrow(values),
+      ncol = ncol(rotation)
+    )
+  } else {
+    transformed <- values
+    if (is.numeric(object$center)) {
+      transformed <- sweep(transformed, 2L, object$center, "-")
+    }
+    if (is.numeric(object$scale)) {
+      transformed <- sweep(transformed, 2L, object$scale, "/")
+    }
+    scores <- transformed %*% rotation
+  }
+
+  dimnames(scores) <- list(rownames(values), colnames(rotation))
+  attr(scores, "device") <- selection$device
+  stages <- .learn_add_stage(list(), "input_materialization", input_stage)
+  backend <- if (identical(selection$device, "cuda")) "torch" else "base"
+  stages$projection <- .learn_stage(
+    selection,
+    backend = backend,
+    output_device = "cpu"
+  )
+  .with_learning_provenance(
+    scores,
+    stages,
+    requested_device = selection$requested_device,
+    backend = backend,
+    parameters = list(n_components = ncol(rotation)),
+    source_device = source_device,
+    source_class = source_class
+  )
+}
+
+.stable_row_norm_cpu <- function(x) {
+  result <- numeric(nrow(x))
+  row_scale <- apply(abs(x), 1L, max)
+  infinite <- is.infinite(row_scale)
+  result[infinite] <- Inf
+  finite_nonzero <- is.finite(row_scale) & row_scale > 0
+  if (any(finite_nonzero)) {
+    scaled <- x[finite_nonzero, , drop = FALSE] /
+      row_scale[finite_nonzero]
+    result[finite_nonzero] <- row_scale[finite_nonzero] *
+      sqrt(rowSums(scaled^2))
+  }
+  result
+}
+
+.recompute_euclidean_pairs_cpu <- function(distance, x, y, risk) {
+  pairs <- which(risk, arr.ind = TRUE)
+  if (!nrow(pairs)) {
+    return(distance)
+  }
+
+  # Bound the temporary direct-difference matrix to roughly one million
+  # doubles. This keeps targeted recomputation predictable even when an
+  # adversarial input makes many pairs numerically risky.
+  pairs_per_chunk <- max(1L, floor(1e6 / ncol(x)))
+  starts <- seq.int(1L, nrow(pairs), by = pairs_per_chunk)
+  for (start in starts) {
+    rows <- seq.int(
+      start,
+      length.out = min(pairs_per_chunk, nrow(pairs) - start + 1L)
+    )
+    selected <- pairs[rows, , drop = FALSE]
+    differences <- x[selected[, 1L], , drop = FALSE] -
+      y[selected[, 2L], , drop = FALSE]
+    distance[selected] <- .stable_row_norm_cpu(differences)
+  }
+  distance
+}
+
+.euclidean_distance_cpu <- function(x, y) {
+  # Euclidean distance is invariant to a common translation. Translating by
+  # one observation removes large shared offsets before the fast squared-norm
+  # identity is evaluated by BLAS.
+  anchor <- x[1L, , drop = TRUE]
+  x_translated <- sweep(x, 2L, anchor, "-")
+  y_translated <- sweep(y, 2L, anchor, "-")
+  input_scale <- 1
+  pre_scaled <- any(!is.finite(x_translated)) ||
+    any(!is.finite(y_translated))
+
+  if (pre_scaled) {
+    # Opposite extreme finite values can overflow during translation. Scaling
+    # the original inputs first bounds that subtraction without changing the
+    # final distance. Numerically collapsed close pairs are caught below and
+    # recomputed from their direct differences.
+    input_scale <- max(abs(x), abs(y))
+    x_scaled <- x / input_scale
+    y_scaled <- y / input_scale
+    anchor <- x_scaled[1L, , drop = TRUE]
+    x_translated <- sweep(x_scaled, 2L, anchor, "-")
+    y_translated <- sweep(y_scaled, 2L, anchor, "-")
+  }
+
+  translation_scale <- max(abs(x_translated), abs(y_translated))
+  if (translation_scale == 0) {
+    return(matrix(0, nrow = nrow(x), ncol = nrow(y)))
+  }
+  x_work <- x_translated / translation_scale
+  y_work <- y_translated / translation_scale
+
+  x_squared_norm <- rowSums(x_work^2)
+  y_squared_norm <- rowSums(y_work^2)
+  cross_product <- tcrossprod(x_work, y_work)
+  squared <- outer(x_squared_norm, y_squared_norm, "+") -
+    2 * cross_product
+
+  # A squared-norm identity is unreliable only when cancellation is large
+  # relative to the terms being combined. Use a deliberately conservative
+  # threshold, then repair just those pairs with direct, scale-first norms.
+  roundoff_scale <- outer(x_squared_norm, y_squared_norm, "+") +
+    2 * abs(cross_product)
+  risk_ratio <- max(
+    sqrt(.Machine$double.eps),
+    64 * .Machine$double.eps * ncol(x)
+  )
+  risk <- !is.finite(squared) |
+    squared <= risk_ratio * roundoff_scale
+
+  if (identical(x, y)) {
+    diagonal <- seq_len(nrow(x))
+    squared[cbind(diagonal, diagonal)] <- 0
+    risk[cbind(diagonal, diagonal)] <- FALSE
+  }
+
+  distance <- if (pre_scaled) {
+    input_scale * (translation_scale * sqrt(pmax(squared, 0)))
+  } else {
+    translation_scale * sqrt(pmax(squared, 0))
+  }
+  risk <- risk | !is.finite(distance)
+  .recompute_euclidean_pairs_cpu(distance, x, y, risk)
+}
+
 .cosine_unit_rows <- function(x, argument) {
   row_scale <- apply(abs(x), 1L, max)
   if (any(row_scale == 0)) {
@@ -436,6 +881,12 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
 #' @param device One of `"auto"`, `"cuda"`, or `"cpu"`.
 #' @return A dense numeric distance matrix with a `device` attribute. Input
 #'   observation names are retained as row and column names when present.
+#' @details On CPU, Euclidean distances use a common translation and global
+#'   scaling before a vectorized calculation. Pairs at risk of cancellation or
+#'   non-finite intermediate results are recomputed from direct observation
+#'   differences with a scale-first norm. This avoids cancellation from large
+#'   shared offsets and avoids avoidable overflow and underflow for extreme
+#'   finite values.
 #' @export
 #' @examples
 #' cuda_distance(matrix(1:12, 4, 3), device = "cpu")
@@ -446,14 +897,14 @@ cuda_distance <- function(x, y = NULL,
   source_class <- class(x)[[1L]]
   input_x_stage <- .learn_input_stage(x)
   input_y_stage <- if (is.null(y)) NULL else .learn_input_stage(y)
-  x <- .learn_matrix(x)
+  x <- .learn_matrix(x, min_rows = 1L)
   x_names <- rownames(x)
   self <- is.null(y)
   if (self) {
     y <- x
     y_names <- x_names
   } else {
-    y <- .learn_matrix(y, "y")
+    y <- .learn_matrix(y, "y", min_rows = 1L)
     y_names <- rownames(y)
   }
   if (ncol(x) != ncol(y)) {
@@ -481,9 +932,7 @@ cuda_distance <- function(x, y = NULL,
     }
     distance <- .torch_array(result)
   } else if (metric == "euclidean") {
-    squared <- outer(rowSums(x^2), rowSums(y^2), "+") -
-      2 * tcrossprod(x, y)
-    distance <- sqrt(pmax(squared, 0))
+    distance <- .euclidean_distance_cpu(x, y)
   } else {
     distance <- 1 - tcrossprod(x_unit, y_unit)
   }
@@ -534,15 +983,9 @@ cuda_distance <- function(x, y = NULL,
     x
   }
   storage <- if (device == "cuda") .torch_matrix(values) else NULL
-  squared_norm <- if (device == "cpu" && metric == "euclidean") {
-    rowSums(values^2)
-  } else {
-    NULL
-  }
   list(
     values = values,
     storage = storage,
-    squared_norm = squared_norm,
     metric = metric,
     device = device
   )
@@ -558,15 +1001,10 @@ cuda_distance <- function(x, y = NULL,
     }
     distance <- .torch_array(result)
   } else if (state$metric == "euclidean") {
-    squared <- outer(
-      state$squared_norm[rows],
-      state$squared_norm,
-      "+"
-    ) - 2 * tcrossprod(
+    distance <- .euclidean_distance_cpu(
       state$values[rows, , drop = FALSE],
       state$values
     )
-    distance <- sqrt(pmax(squared, 0))
   } else {
     distance <- 1 - tcrossprod(
       state$values[rows, , drop = FALSE],
@@ -609,6 +1047,8 @@ cuda_distance <- function(x, y = NULL,
 #' `min(batch_size, nrow(x))`-by-`nrow(x)` dense distance block instead of a
 #' complete pairwise distance matrix. On CUDA, distance blocks are computed
 #' with torch and transferred to the CPU for deterministic neighbour ordering.
+#' On CPU, Euclidean blocks use the same guarded translated-and-scaled
+#' implementation as [cuda_distance()].
 #' @export
 #' @examples
 #' cuda_knn(
@@ -856,6 +1296,121 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
     ),
     source_device = source_device,
     source_class = source_class
+  )
+}
+
+#' Assign observations with a fitted CUDA-aware k-means model
+#'
+#' `predict.cuda_kmeans()` computes Euclidean distances to the fitted centres
+#' and returns either the closest-centre assignment or the complete distance
+#' matrix. Named features may be supplied in any order and are aligned safely.
+#'
+#' @param object A fitted `cuda_kmeans` object.
+#' @param newdata A finite numeric matrix or data frame with observations in
+#'   rows and model features in columns. When omitted and `type = "cluster"`,
+#'   the training assignments in `object$cluster` are returned.
+#' @param type Return closest-centre `"cluster"` assignments or the
+#'   observation-by-centre `"distance"` matrix.
+#' @param device Device used for the distance calculation. `"model"` reuses
+#'   the fitted model's actual distance device; `"auto"`, `"cuda"`, and
+#'   `"cpu"` follow the usual cudaverse device-selection rules.
+#' @param ... Must be empty.
+#' @return For `type = "cluster"`, an integer vector with observation names
+#'   and, for recomputed assignments, stage-level provenance. For
+#'   `type = "distance"`, a numeric matrix whose columns identify the fitted
+#'   centres. Omitting `newdata` returns validated stored training assignments
+#'   unchanged and does not create a prediction stage.
+#' @seealso [cuda_kmeans()]
+#' @method predict cuda_kmeans
+#' @export
+#' @examples
+#' train <- as.matrix(iris[1:100, 1:4])
+#' fit <- cuda_kmeans(train, centers = 3, seed = 1, device = "cpu")
+#' predict(fit, as.matrix(iris[101:105, 1:4]), device = "cpu")
+predict.cuda_kmeans <- function(object, newdata,
+                               type = c("cluster", "distance"),
+                               device = c("model", "auto", "cuda", "cpu"),
+                               ...) {
+  .learn_check_prediction_dots(...)
+  centers <- .learn_validate_kmeans(object)
+  type <- match.arg(type)
+  if (missing(newdata)) {
+    if (identical(type, "distance")) {
+      stop(
+        "`newdata` is required when `type = \"distance\"`.",
+        call. = FALSE
+      )
+    }
+    .learn_validate_kmeans_clusters(object)
+    return(object$cluster)
+  }
+
+  source_device <- .learn_source_device(newdata)
+  source_class <- class(newdata)[[1L]]
+  input_stage <- .learn_input_stage(newdata)
+  values <- .learn_prediction_matrix(
+    newdata,
+    feature_names = colnames(centers),
+    n_features = ncol(centers)
+  )
+  selection <- .learn_prediction_selection(device, object$device)
+  distances <- cuda_distance(
+    values,
+    centers,
+    metric = "euclidean",
+    device = selection$device
+  )
+  center_names <- rownames(centers)
+  if (is.null(center_names)) {
+    center_names <- paste0("cluster_", seq_len(nrow(centers)))
+  }
+  dimnames(distances) <- list(rownames(values), center_names)
+  stages <- .learn_add_stage(
+    list(),
+    "input_materialization",
+    input_stage
+  )
+  distance_backend <- if (identical(selection$device, "cuda")) {
+    "torch"
+  } else {
+    "base"
+  }
+  stages$distance <- .learn_stage(
+    selection,
+    backend = distance_backend,
+    output_device = "cpu"
+  )
+  distances <- .with_learning_provenance(
+    distances,
+    stages,
+    requested_device = selection$requested_device,
+    backend = distance_backend,
+    parameters = list(type = "distance", metric = "euclidean"),
+    source_device = source_device,
+    source_class = source_class
+  )
+  if (identical(type, "distance")) {
+    return(distances)
+  }
+
+  cluster <- max.col(-distances, ties.method = "first")
+  names(cluster) <- rownames(values)
+  attr(cluster, "device") <- attr(distances, "device", exact = TRUE)
+  stages <- attr(distances, "compute_stages", exact = TRUE)
+  stages$assignment <- .learn_cpu_stage()
+  backend <- if (identical(distance_backend, "torch")) {
+    "torch+base"
+  } else {
+    "base"
+  }
+  .with_learning_provenance(
+    cluster,
+    stages,
+    requested_device = selection$requested_device,
+    backend = backend,
+    parameters = list(type = "cluster", metric = "euclidean"),
+    source_device = attr(distances, "source_device", exact = TRUE),
+    source_class = attr(distances, "source_class", exact = TRUE)
   )
 }
 
