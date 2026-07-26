@@ -105,6 +105,16 @@ runtime.</p>
 <span>  centers <span class="op">=</span> <span class="fl">3</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  device <span class="op">=</span> <span class="st">"cpu"</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">projected</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span></span>
+<span>  <span class="va">pca</span>,</span>
+<span>  <span class="va">x</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">3</span>, , drop <span class="op">=</span> <span class="cn">FALSE</span><span class="op">]</span>,</span>
+<span>  device <span class="op">=</span> <span class="st">"cpu"</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">assigned</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span></span>
+<span>  <span class="va">clusters</span>,</span>
+<span>  <span class="va">projected</span>,</span>
+<span>  device <span class="op">=</span> <span class="st">"cpu"</span></span>
 <span><span class="op">)</span></span></code></pre></div>
 <p>The numerical results remain ordinary R objects. Provenance is
 separate, stable metadata:</p>
@@ -147,6 +157,20 @@ separate, stable metadata:</p>
 <span><span class="co">#&gt;  output_device</span></span>
 <span><span class="co">#&gt;            cpu</span></span>
 <span><span class="co">#&gt;            cpu</span></span>
+<span><span class="co">#&gt;            cpu</span></span>
+<span><span class="co">#&gt;            cpu</span></span>
+<span><span class="fu"><a href="../reference/cuda_provenance.html">cuda_provenance</a></span><span class="op">(</span><span class="va">projected</span><span class="op">)</span></span>
+<span><span class="co">#&gt; &lt;cuda_provenance schema=cudaverse-stage/1 stages=1 compute=cpu&gt;</span></span>
+<span><span class="co">#&gt;       stage requested_device device backend selection_reason fallback</span></span>
+<span><span class="co">#&gt;  projection              cpu    cpu    base     explicit_cpu    FALSE</span></span>
+<span><span class="co">#&gt;  output_device</span></span>
+<span><span class="co">#&gt;            cpu</span></span>
+<span><span class="fu"><a href="../reference/cuda_provenance.html">cuda_provenance</a></span><span class="op">(</span><span class="va">assigned</span><span class="op">)</span></span>
+<span><span class="co">#&gt; &lt;cuda_provenance schema=cudaverse-stage/1 stages=2 compute=cpu&gt;</span></span>
+<span><span class="co">#&gt;       stage requested_device device backend   selection_reason fallback</span></span>
+<span><span class="co">#&gt;    distance              cpu    cpu    base       explicit_cpu    FALSE</span></span>
+<span><span class="co">#&gt;  assignment        fixed-cpu    cpu    base algorithm_cpu_only    FALSE</span></span>
+<span><span class="co">#&gt;  output_device</span></span>
 <span><span class="co">#&gt;            cpu</span></span>
 <span><span class="co">#&gt;            cpu</span></span></code></pre></div>
 <p><code><a href="../reference/cuda_provenance.html">cuda_provenance()</a></code> returns one row per stage. Its columns
@@ -297,12 +321,184 @@ requests.</p>
 <td><code>base</code></td>
 <td>CPU R list</td>
 </tr>
+<tr class="odd">
+<td><code>predict(cuda_pca)</code></td>
+<td><code>projection</code></td>
+<td><code>base</code></td>
+<td><code>torch</code></td>
+<td>CPU matrix</td>
+</tr>
+<tr class="even">
+<td><code>predict(cuda_kmeans)</code></td>
+<td><code>distance</code></td>
+<td><code>base</code></td>
+<td><code>torch</code></td>
+<td>CPU matrix</td>
+</tr>
+<tr class="odd">
+<td><code>predict(cuda_kmeans)</code></td>
+<td><code>assignment</code></td>
+<td><code>base</code></td>
+<td><code>base</code></td>
+<td>CPU vector</td>
+</tr>
 </tbody>
 </table>
 <p>Thus SVD, PCA, and distance have a CUDA aggregate when explicitly run
 on CUDA. kNN and k-means are intentionally hybrid: CUDA accelerates
 distance calculation, while deterministic selection, assignments, and
 centre updates remain in R on the CPU.</p>
+</div>
+<div class="section level2">
+<h2 id="reuse-fitted-models-on-new-observations">Reuse fitted models on new observations<a class="anchor" aria-label="anchor" href="#reuse-fitted-models-on-new-observations"></a>
+</h2>
+<p>Fitting is only half of a reusable analysis. Standard
+<code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> methods apply the learned PCA transformation or
+fitted k-means centres without refitting:</p>
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">new_observations</span> <span class="op">&lt;-</span> <span class="va">x</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">2</span>, <span class="fu"><a href="https://rdrr.io/r/base/rev.html" class="external-link">rev</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">colnames</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span>, drop <span class="op">=</span> <span class="cn">FALSE</span><span class="op">]</span></span>
+<span><span class="va">new_scores</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span></span>
+<span>  <span class="va">pca</span>,</span>
+<span>  <span class="va">new_observations</span>,</span>
+<span>  device <span class="op">=</span> <span class="st">"cpu"</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">new_clusters</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span></span>
+<span>  <span class="va">clusters</span>,</span>
+<span>  <span class="va">new_scores</span>,</span>
+<span>  device <span class="op">=</span> <span class="st">"cpu"</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">new_scores</span></span>
+<span><span class="co">#&gt;                PC1        PC2</span></span>
+<span><span class="co">#&gt; flower_1 -2.603205 -1.6085337</span></span>
+<span><span class="co">#&gt; flower_2 -2.046302  0.9315384</span></span>
+<span><span class="co">#&gt; attr(,"device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"provenance_schema")</span></span>
+<span><span class="co">#&gt; [1] "cudaverse-stage/1"</span></span>
+<span><span class="co">#&gt; attr(,"requested_device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"compute_device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"compute_stages")</span></span>
+<span><span class="co">#&gt; attr(,"compute_stages")$projection</span></span>
+<span><span class="co">#&gt; $requested_device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $backend</span></span>
+<span><span class="co">#&gt; [1] "base"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $selection_reason</span></span>
+<span><span class="co">#&gt; [1] "explicit_cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $fallback</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $output_device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"class")</span></span>
+<span><span class="co">#&gt; [1] "cuda_stage"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"backend")</span></span>
+<span><span class="co">#&gt; [1] "base"</span></span>
+<span><span class="co">#&gt; attr(,"parameters")</span></span>
+<span><span class="co">#&gt; attr(,"parameters")$n_components</span></span>
+<span><span class="co">#&gt; [1] 2</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"source_device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"source_class")</span></span>
+<span><span class="co">#&gt; [1] "matrix"</span></span>
+<span><span class="va">new_clusters</span></span>
+<span><span class="co">#&gt; flower_1 flower_2 </span></span>
+<span><span class="co">#&gt;        3        3 </span></span>
+<span><span class="co">#&gt; attr(,"device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"provenance_schema")</span></span>
+<span><span class="co">#&gt; [1] "cudaverse-stage/1"</span></span>
+<span><span class="co">#&gt; attr(,"requested_device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"compute_device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"compute_stages")</span></span>
+<span><span class="co">#&gt; attr(,"compute_stages")$distance</span></span>
+<span><span class="co">#&gt; $requested_device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $backend</span></span>
+<span><span class="co">#&gt; [1] "base"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $selection_reason</span></span>
+<span><span class="co">#&gt; [1] "explicit_cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $fallback</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $output_device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"class")</span></span>
+<span><span class="co">#&gt; [1] "cuda_stage"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"compute_stages")$assignment</span></span>
+<span><span class="co">#&gt; $requested_device</span></span>
+<span><span class="co">#&gt; [1] "fixed-cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $backend</span></span>
+<span><span class="co">#&gt; [1] "base"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $selection_reason</span></span>
+<span><span class="co">#&gt; [1] "algorithm_cpu_only"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $fallback</span></span>
+<span><span class="co">#&gt; [1] FALSE</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; $output_device</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"class")</span></span>
+<span><span class="co">#&gt; [1] "cuda_stage"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"backend")</span></span>
+<span><span class="co">#&gt; [1] "base"</span></span>
+<span><span class="co">#&gt; attr(,"parameters")</span></span>
+<span><span class="co">#&gt; attr(,"parameters")$type</span></span>
+<span><span class="co">#&gt; [1] "cluster"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"parameters")$metric</span></span>
+<span><span class="co">#&gt; [1] "euclidean"</span></span>
+<span><span class="co">#&gt; </span></span>
+<span><span class="co">#&gt; attr(,"source_device")</span></span>
+<span><span class="co">#&gt; [1] "cpu"</span></span>
+<span><span class="co">#&gt; attr(,"source_class")</span></span>
+<span><span class="co">#&gt; [1] "matrix"</span></span></code></pre></div>
+<p>The reversed columns above are intentional. When a model was fitted
+with feature names, prediction aligns the same unique names
+automatically. It fails clearly for missing, unexpected, or unnamed
+features instead of silently projecting values in the wrong order. If
+duplicated feature names were used for fitting, prediction requires the
+exact original order because a safe reordering would be ambiguous.</p>
+<p>Omitting <code>newdata</code> returns the stored training scores or
+assignments. Set <code>type = "distance"</code> for k-means to receive
+the complete observation-by-centre distance matrix. Both prediction
+methods accept one observation and reuse the model’s actual device by
+default; <code>device = "cpu"</code>, <code>"cuda"</code>, or
+<code>"auto"</code> can override that choice explicitly. In particular,
+<code>device = "cpu"</code> makes a saved CUDA-fitted model portable to
+a machine without a CUDA runtime. Stored-value retrieval validates the
+stored scores or assignments but does not perform computation or attach
+a new prediction stage; only recomputed predictions have prediction
+provenance.</p>
 <p>If a CUDA <code>cudatensor</code> must first be materialized as an R
 matrix, provenance also includes an <code>input_materialization</code>
 stage. This makes a device transfer visible instead of presenting the
@@ -313,7 +509,7 @@ subsequent kernel as the whole workflow.</p>
 </h2>
 <p>Diagnostics are non-destructive: they inspect the optional torch
 runtime but never install or download it.</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">diagnostics</span> <span class="op">&lt;-</span> <span class="fu">cudatensr</span><span class="fu">::</span><span class="fu"><a href="https://cudaverse.github.io/cudatensr/reference/cuda_diagnostics.html" class="external-link">cuda_diagnostics</a></span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="va">diagnostics</span></span>
 <span><span class="co">#&gt; &lt;cuda_diagnostics available=FALSE devices=0 torch=0.17.0 reason=backend_error&gt;</span></span></code></pre></div>
@@ -331,6 +527,9 @@ back.</li>
 device. Otherwise it selects CPU and records
 <code>fallback = TRUE</code> plus a stable reason such as
 <code>torch_not_installed</code> or <code>cuda_unavailable</code>.</li>
+<li>Prediction’s <code>"model"</code> choice reuses the fitted object’s
+actual device and records <code>requested_device = "inherited"</code>
+with <code>selection_reason = "model_device"</code>.</li>
 <li>Once CUDA has been selected, an execution error is reported as an
 error. It is not retried silently on CPU.</li>
 </ul>
@@ -340,7 +539,7 @@ error. It is not retried silently on CPU.</li>
 </h2>
 <p>The same data can be used for a small CUDA smoke test. The
 conditional keeps the vignette runnable on machines without a GPU.</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Logic.html" class="external-link">isTRUE</a></span><span class="op">(</span><span class="va">diagnostics</span><span class="op">$</span><span class="va">cuda_available</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span>
 <span>  <span class="va">cuda_pca_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/cuda_pca.html">cuda_pca</a></span><span class="op">(</span></span>
 <span>    <span class="va">x</span>,</span>
@@ -376,7 +575,11 @@ of observations or features before PCA when the dense representation is
 too large.</p>
 <p><code><a href="../reference/cuda_distance.html">cuda_distance()</a></code> intentionally returns the complete dense
 pairwise matrix, requiring about <code>8 * nrow(x) * nrow(y)</code>
-bytes for doubles.</p>
+bytes for doubles. Its CPU Euclidean path applies a common translation
+and global scaling before a vectorized calculation, then recomputes
+numerically risky pairs from direct, scale-first differences. This
+avoids cancellation from large squared norms and avoids avoidable
+overflow or underflow.</p>
 <p><code><a href="../reference/cuda_knn.html">cuda_knn()</a></code> is exact and quadratic in time, but
 <code>batch_size</code> bounds its resident distance block to
 approximately <code>8 * min(batch_size, nrow(x)) * nrow(x)</code> bytes.
@@ -398,7 +601,7 @@ count. It then compares the public CPU and CUDA paths and verifies their
 provenance.</p>
 <p>Projects reusing the same convention can turn the environment marker
 into a hard local gate:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">require_cuda</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/chartr.html" class="external-link">tolower</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Sys.getenv.html" class="external-link">Sys.getenv</a></span><span class="op">(</span><span class="st">"CUDAVERSE_REQUIRE_CUDA"</span>, unset <span class="op">=</span> <span class="st">"false"</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>  <span class="st">"true"</span></span>

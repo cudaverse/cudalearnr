@@ -56,7 +56,9 @@ The implementation constructs at most a
 `min(batch_size, nrow(x))`-by-`nrow(x)` dense distance block instead of
 a complete pairwise distance matrix. On CUDA, distance blocks are
 computed with torch and transferred to the CPU for deterministic
-neighbour ordering.
+neighbour ordering. On CPU, Euclidean blocks use the same guarded
+translated-and-scaled implementation as
+[`cuda_distance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_distance.md).
 
 ## Examples
 

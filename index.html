@@ -60,6 +60,7 @@
 <li>Euclidean and cosine distances (<code><a href="reference/cuda_distance.html">cuda_distance()</a></code>).</li>
 <li>k-nearest neighbours (<code><a href="reference/cuda_knn.html">cuda_knn()</a></code>).</li>
 <li>Lloyd k-means with a GPU-capable distance step (<code><a href="reference/cuda_kmeans.html">cuda_kmeans()</a></code>).</li>
+<li>Post-fit PCA projection and k-means assignment through standard <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> methods.</li>
 </ul>
 </div>
 <div class="section level2">
@@ -75,22 +76,45 @@
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://cudaverse.github.io/cudalearnr/">cudalearnr</a></span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/scale.html" class="external-link">scale</a></span><span class="op">(</span><span class="va">iris</span><span class="op">[</span>, <span class="fl">1</span><span class="op">:</span><span class="fl">4</span><span class="op">]</span><span class="op">)</span></span>
+<span><span class="va">features</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">as.matrix</a></span><span class="op">(</span><span class="va">iris</span><span class="op">[</span>, <span class="fl">1</span><span class="op">:</span><span class="fl">4</span><span class="op">]</span><span class="op">)</span></span>
+<span><span class="va">train</span> <span class="op">&lt;-</span> <span class="va">features</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">120</span>, <span class="op">]</span></span>
+<span><span class="va">holdout</span> <span class="op">&lt;-</span> <span class="va">features</span><span class="op">[</span><span class="fl">121</span><span class="op">:</span><span class="fl">150</span>, <span class="op">]</span></span>
 <span></span>
-<span><span class="va">pca</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cuda_pca.html">cuda_pca</a></span><span class="op">(</span><span class="va">x</span>, n_components <span class="op">=</span> <span class="fl">2</span><span class="op">)</span></span>
+<span><span class="va">pca</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cuda_pca.html">cuda_pca</a></span><span class="op">(</span><span class="va">train</span>, n_components <span class="op">=</span> <span class="fl">2</span><span class="op">)</span></span>
 <span><span class="va">knn</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cuda_knn.html">cuda_knn</a></span><span class="op">(</span><span class="va">pca</span><span class="op">$</span><span class="va">x</span>, k <span class="op">=</span> <span class="fl">10</span>, batch_size <span class="op">=</span> <span class="fl">128</span><span class="op">)</span></span>
 <span><span class="va">clusters</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cuda_kmeans.html">cuda_kmeans</a></span><span class="op">(</span><span class="va">pca</span><span class="op">$</span><span class="va">x</span>, centers <span class="op">=</span> <span class="fl">3</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span>
 <span></span>
+<span><span class="va">holdout_pca</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">pca</span>, <span class="va">holdout</span><span class="op">)</span></span>
+<span><span class="va">holdout_cluster</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">clusters</span>, <span class="va">holdout_pca</span><span class="op">)</span></span>
+<span></span>
 <span><span class="va">pca</span></span>
 <span><span class="va">knn</span></span>
-<span><span class="va">clusters</span></span></code></pre></div>
+<span><span class="va">clusters</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">holdout_cluster</span><span class="op">)</span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="predict-new-observations-safely">Predict new observations safely<a class="anchor" aria-label="anchor" href="#predict-new-observations-safely"></a>
+</h2>
+<p><code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> reuses the fitted PCA preprocessing and loadings, or assigns observations to the closest fitted k-means centre. A fitted model’s actual device is reused by default; set <code>device = "cpu"</code>, <code>"cuda"</code>, or <code>"auto"</code> to make a different request. This override also lets a model fitted and saved on a CUDA machine be used later on a CPU-only machine. Provenance records the default as <code>requested_device = "inherited"</code> with <code>selection_reason = "model_device"</code>; it does not mislabel that choice as an explicit request.</p>
+<p>Feature names are part of the prediction contract. Columns supplied in a different order are aligned automatically, while missing, unexpected, or unnamed features are rejected when the model was fitted with named columns:</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">shuffled</span> <span class="op">&lt;-</span> <span class="va">holdout</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/rev.html" class="external-link">rev</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">colnames</a></span><span class="op">(</span><span class="va">holdout</span><span class="op">)</span><span class="op">)</span>, drop <span class="op">=</span> <span class="cn">FALSE</span><span class="op">]</span></span>
+<span><span class="va">holdout_pca</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span><span class="va">pca</span>, <span class="va">shuffled</span>, device <span class="op">=</span> <span class="st">"cpu"</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">center_distance</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span></span>
+<span>  <span class="va">clusters</span>,</span>
+<span>  <span class="va">holdout_pca</span>,</span>
+<span>  type <span class="op">=</span> <span class="st">"distance"</span>,</span>
+<span>  device <span class="op">=</span> <span class="st">"cpu"</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+<p>Both methods accept a one-row matrix. Prediction results retain observation and component or centre names. Recomputed results also carry stage-level provenance, so <code>cuda_provenance(holdout_pca)</code> reports where projection actually ran. Calling <code>predict(pca)</code> or <code>predict(clusters)</code> without <code>newdata</code> validates and returns the stored training values unchanged; retrieval does not create new compute provenance.</p>
 </div>
 <div class="section level2">
 <h2 id="backend-semantics">Backend semantics<a class="anchor" aria-label="anchor" href="#backend-semantics"></a>
 </h2>
 <p>When a CUDA-enabled R torch installation is available, SVD/PCA, pairwise distances, and kNN distance blocks execute through libtorch on the GPU. k-means uses GPU distance calculations while updating centres in R. Without CUDA, the same APIs use base R and <code>stats</code>.</p>
 <p>Every result records the requested device, actual stage devices, concrete backend, output device, and any automatic fallback. Inspect those fields as a table with <code><a href="reference/cuda_provenance.html">cuda_provenance()</a></code>:</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">cudatensr</span><span class="fu">::</span><span class="fu"><a href="https://cudaverse.github.io/cudatensr/reference/cuda_diagnostics.html" class="external-link">cuda_diagnostics</a></span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/cuda_provenance.html">cuda_provenance</a></span><span class="op">(</span><span class="va">pca</span><span class="op">)</span></span></code></pre></div>
 <table class="table">
@@ -137,6 +161,18 @@
 <td>initialization, assignment, centre updates</td>
 <td><code>hybrid</code></td>
 </tr>
+<tr>
+<td><code>predict(cuda_pca)</code></td>
+<td>projection</td>
+<td>R result materialization</td>
+<td><code>cuda</code></td>
+</tr>
+<tr>
+<td><code>predict(cuda_kmeans)</code></td>
+<td>distance calculation</td>
+<td>closest-centre assignment</td>
+<td><code>hybrid</code></td>
+</tr>
 </tbody>
 </table>
 <p>Here, “CUDA aggregate” describes a successful explicit CUDA run. An automatic request that cannot use CUDA records a CPU fallback instead. See <a href="https://cudaverse.github.io/cudalearnr/articles/backend-provenance.html">Backend provenance and CUDA diagnostics</a> for a runnable CPU tutorial, the complete stage contract, memory guidance, and the hardware-CI gate.</p>
@@ -145,7 +181,7 @@
 <h2 id="exact-knn-without-a-full-distance-matrix">Exact kNN without a full distance matrix<a class="anchor" aria-label="anchor" href="#exact-knn-without-a-full-distance-matrix"></a>
 </h2>
 <p><code><a href="reference/cuda_knn.html">cuda_knn()</a></code> compares every observation with every other observation, but works on query batches:</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">neighbors</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/cuda_knn.html">cuda_knn</a></span><span class="op">(</span></span>
 <span>  <span class="va">x</span>,</span>
 <span>  k <span class="op">=</span> <span class="fl">15</span>,</span>
@@ -153,13 +189,14 @@
 <span>  batch_size <span class="op">=</span> <span class="fl">256</span></span>
 <span><span class="op">)</span></span></code></pre></div>
 <p>At most <code>min(batch_size, nrow(x)) * nrow(x)</code> distances are held at once, instead of an <code>nrow(x) * nrow(x)</code> distance matrix. The returned <code>index</code> and <code>distance</code> matrices require only <code>nrow(x) * k</code> entries. A smaller batch uses less memory; a larger batch can improve throughput. This is still an exact quadratic-time algorithm.</p>
+<p>CPU Euclidean distances use a common translation and global scaling before a vectorized calculation. Numerically risky pairs are recomputed from direct observation differences with a scale-first norm. This retains nearby distances when values share a large common offset and avoids avoidable overflow or underflow at extreme finite magnitudes. The same implementation is used by <code><a href="reference/cuda_distance.html">cuda_distance()</a></code>, CPU kNN blocks, and the distance steps in CPU k-means.</p>
 <p>Each observation excludes itself. When multiple candidates have exactly the same distance, the candidate with the smaller input row number is selected first, so changing <code>batch_size</code> does not change the result.</p>
 </div>
 <div class="section level2">
 <h2 id="identifier-preservation">Identifier preservation<a class="anchor" aria-label="anchor" href="#identifier-preservation"></a>
 </h2>
 <p>Observation and feature names are part of the result contract. PCA scores, distances, neighbour queries, singular vectors, and cluster assignments retain the corresponding input names on both CPU and CUDA backends. PCA components use stable <code>PC1</code>, <code>PC2</code>, … names, and kNN neighbour identities can be mapped without relying on an external reordered table:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/colnames.html" class="external-link">rownames</a></span><span class="op">(</span><span class="va">neighbors</span><span class="op">$</span><span class="va">index</span><span class="op">)</span><span class="op">[</span><span class="va">neighbors</span><span class="op">$</span><span class="va">index</span><span class="op">]</span></span></code></pre></div>
 <p>On CUDA, the validated input is uploaded once, distance blocks are computed with torch, and each block is returned to the CPU for deterministic ordering. Neighbour selection is therefore not yet fully device-resident. Use <code><a href="reference/cuda_distance.html">cuda_distance()</a></code> only when the complete dense pairwise matrix is actually needed.</p>
 <p>The first release prioritizes correctness and a stable R API. Approximate neighbour search and fully device-resident neighbour selection remain future milestones.</p>

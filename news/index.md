@@ -2,6 +2,23 @@
 
 ## cudalearnr 0.2.0
 
+- Fitted `cuda_pca` and `cuda_kmeans` objects now support standard
+  [`predict()`](https://rdrr.io/r/stats/predict.html) workflows for new
+  observations. Prediction aligns named features safely, accepts a
+  single observation, preserves identifiers, supports explicit CPU/CUDA
+  selection, and records the projection or assignment stages.
+- Prediction with `device = "model"` now records an inherited
+  model-device decision instead of misreporting an explicit CPU or CUDA
+  request. Stored training scores and assignments are validated before
+  retrieval and are documented separately from recomputed predictions.
+- [`cuda_distance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_distance.md)
+  now accepts one-row inputs, enabling single-observation scoring
+  without special casing.
+- CPU Euclidean distance, exact kNN, and k-means now combine a
+  translated, globally scaled vectorized path with targeted direct,
+  scale-first difference norms. This avoids catastrophic cancellation
+  for nearby values with large common offsets and avoids avoidable
+  overflow or underflow without giving up the fast common case.
 - SVD, PCA, distance, exact kNN, and k-means results now expose the
   shared stage-level provenance schema, their original device request,
   concrete backend, effective parameters, source metadata, and aggregate

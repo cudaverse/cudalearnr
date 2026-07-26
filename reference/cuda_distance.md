@@ -33,6 +33,15 @@ cuda_distance(
 A dense numeric distance matrix with a `device` attribute. Input
 observation names are retained as row and column names when present.
 
+## Details
+
+On CPU, Euclidean distances use a common translation and global scaling
+before a vectorized calculation. Pairs at risk of cancellation or
+non-finite intermediate results are recomputed from direct observation
+differences with a scale-first norm. This avoids cancellation from large
+shared offsets and avoids avoidable overflow and underflow for extreme
+finite values.
+
 ## Examples
 
 ``` r

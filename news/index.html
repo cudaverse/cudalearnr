@@ -35,7 +35,12 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.2.0" id="cudalearnr-020">cudalearnr 0.2.0<a class="anchor" aria-label="anchor" href="#cudalearnr-020"></a></h2>
-<ul><li>SVD, PCA, distance, exact kNN, and k-means results now expose the shared stage-level provenance schema, their original device request, concrete backend, effective parameters, source metadata, and aggregate compute device.</li>
+<ul><li>Fitted <code>cuda_pca</code> and <code>cuda_kmeans</code> objects now support standard <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> workflows for new observations. Prediction aligns named features safely, accepts a single observation, preserves identifiers, supports explicit CPU/CUDA selection, and records the projection or assignment stages.</li>
+<li>Prediction with <code>device = "model"</code> now records an inherited model-device decision instead of misreporting an explicit CPU or CUDA request. Stored training scores and assignments are validated before retrieval and are documented separately from recomputed predictions.</li>
+<li>
+<code><a href="../reference/cuda_distance.html">cuda_distance()</a></code> now accepts one-row inputs, enabling single-observation scoring without special casing.</li>
+<li>CPU Euclidean distance, exact kNN, and k-means now combine a translated, globally scaled vectorized path with targeted direct, scale-first difference norms. This avoids catastrophic cancellation for nearby values with large common offsets and avoids avoidable overflow or underflow without giving up the fast common case.</li>
+<li>SVD, PCA, distance, exact kNN, and k-means results now expose the shared stage-level provenance schema, their original device request, concrete backend, effective parameters, source metadata, and aggregate compute device.</li>
 <li>CUDA kNN and k-means now report their real hybrid execution: distance kernels run on CUDA while deterministic neighbour ordering, assignment, and centroid updates run on CPU.</li>
 <li>Added a concise <code>cuda_svd</code> print method and made all algorithm print methods disclose backend and aggregate compute device.</li>
 <li>Explicit CUDA unavailability now uses the shared classed condition; automatic CPU selection retains its structured reason.</li>

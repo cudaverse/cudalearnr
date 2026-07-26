@@ -6,6 +6,8 @@
   : GPU-aware singular value decomposition
 - [`cuda_pca()`](https://cudaverse.github.io/cudalearnr/reference/cuda_pca.md)
   : GPU-aware principal component analysis
+- [`predict(`*`<cuda_pca>`*`)`](https://cudaverse.github.io/cudalearnr/reference/predict.cuda_pca.md)
+  : Project observations with a fitted CUDA-aware PCA model
 
 ## Distances and nearest neighbours
 
@@ -18,6 +20,8 @@
 
 - [`cuda_kmeans()`](https://cudaverse.github.io/cudalearnr/reference/cuda_kmeans.md)
   : GPU-aware k-means clustering
+- [`predict(`*`<cuda_kmeans>`*`)`](https://cudaverse.github.io/cudalearnr/reference/predict.cuda_kmeans.md)
+  : Assign observations with a fitted CUDA-aware k-means model
 
 ## Provenance
 

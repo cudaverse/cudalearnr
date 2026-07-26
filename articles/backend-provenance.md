@@ -47,6 +47,16 @@ clusters <- cuda_kmeans(
   seed = 1,
   device = "cpu"
 )
+projected <- predict(
+  pca,
+  x[1:3, , drop = FALSE],
+  device = "cpu"
+)
+assigned <- predict(
+  clusters,
+  projected,
+  device = "cpu"
+)
 ```
 
 The numerical results remain ordinary R objects. Provenance is separate,
@@ -92,6 +102,20 @@ cuda_provenance(clusters)
 #>  output_device
 #>            cpu
 #>            cpu
+#>            cpu
+#>            cpu
+cuda_provenance(projected)
+#> <cuda_provenance schema=cudaverse-stage/1 stages=1 compute=cpu>
+#>       stage requested_device device backend selection_reason fallback
+#>  projection              cpu    cpu    base     explicit_cpu    FALSE
+#>  output_device
+#>            cpu
+cuda_provenance(assigned)
+#> <cuda_provenance schema=cudaverse-stage/1 stages=2 compute=cpu>
+#>       stage requested_device device backend   selection_reason fallback
+#>    distance              cpu    cpu    base       explicit_cpu    FALSE
+#>  assignment        fixed-cpu    cpu    base algorithm_cpu_only    FALSE
+#>  output_device
 #>            cpu
 #>            cpu
 ```
@@ -141,11 +165,168 @@ The following table describes successful CPU and explicit CUDA requests.
 | [`cuda_kmeans()`](https://cudaverse.github.io/cudalearnr/reference/cuda_kmeans.md) | `distance` | `base` | `torch` | CPU distance matrix |
 | [`cuda_kmeans()`](https://cudaverse.github.io/cudalearnr/reference/cuda_kmeans.md) | `assignment` | `base` | `base` | CPU |
 | [`cuda_kmeans()`](https://cudaverse.github.io/cudalearnr/reference/cuda_kmeans.md) | `center_update` | `base` | `base` | CPU R list |
+| `predict(cuda_pca)` | `projection` | `base` | `torch` | CPU matrix |
+| `predict(cuda_kmeans)` | `distance` | `base` | `torch` | CPU matrix |
+| `predict(cuda_kmeans)` | `assignment` | `base` | `base` | CPU vector |
 
 Thus SVD, PCA, and distance have a CUDA aggregate when explicitly run on
 CUDA. kNN and k-means are intentionally hybrid: CUDA accelerates
 distance calculation, while deterministic selection, assignments, and
 centre updates remain in R on the CPU.
+
+## Reuse fitted models on new observations
+
+Fitting is only half of a reusable analysis. Standard
+[`predict()`](https://rdrr.io/r/stats/predict.html) methods apply the
+learned PCA transformation or fitted k-means centres without refitting:
+
+``` r
+
+new_observations <- x[1:2, rev(colnames(x)), drop = FALSE]
+new_scores <- predict(
+  pca,
+  new_observations,
+  device = "cpu"
+)
+new_clusters <- predict(
+  clusters,
+  new_scores,
+  device = "cpu"
+)
+
+new_scores
+#>                PC1        PC2
+#> flower_1 -2.603205 -1.6085337
+#> flower_2 -2.046302  0.9315384
+#> attr(,"device")
+#> [1] "cpu"
+#> attr(,"provenance_schema")
+#> [1] "cudaverse-stage/1"
+#> attr(,"requested_device")
+#> [1] "cpu"
+#> attr(,"compute_device")
+#> [1] "cpu"
+#> attr(,"compute_stages")
+#> attr(,"compute_stages")$projection
+#> $requested_device
+#> [1] "cpu"
+#> 
+#> $device
+#> [1] "cpu"
+#> 
+#> $backend
+#> [1] "base"
+#> 
+#> $selection_reason
+#> [1] "explicit_cpu"
+#> 
+#> $fallback
+#> [1] FALSE
+#> 
+#> $output_device
+#> [1] "cpu"
+#> 
+#> attr(,"class")
+#> [1] "cuda_stage"
+#> 
+#> attr(,"backend")
+#> [1] "base"
+#> attr(,"parameters")
+#> attr(,"parameters")$n_components
+#> [1] 2
+#> 
+#> attr(,"source_device")
+#> [1] "cpu"
+#> attr(,"source_class")
+#> [1] "matrix"
+new_clusters
+#> flower_1 flower_2 
+#>        3        3 
+#> attr(,"device")
+#> [1] "cpu"
+#> attr(,"provenance_schema")
+#> [1] "cudaverse-stage/1"
+#> attr(,"requested_device")
+#> [1] "cpu"
+#> attr(,"compute_device")
+#> [1] "cpu"
+#> attr(,"compute_stages")
+#> attr(,"compute_stages")$distance
+#> $requested_device
+#> [1] "cpu"
+#> 
+#> $device
+#> [1] "cpu"
+#> 
+#> $backend
+#> [1] "base"
+#> 
+#> $selection_reason
+#> [1] "explicit_cpu"
+#> 
+#> $fallback
+#> [1] FALSE
+#> 
+#> $output_device
+#> [1] "cpu"
+#> 
+#> attr(,"class")
+#> [1] "cuda_stage"
+#> 
+#> attr(,"compute_stages")$assignment
+#> $requested_device
+#> [1] "fixed-cpu"
+#> 
+#> $device
+#> [1] "cpu"
+#> 
+#> $backend
+#> [1] "base"
+#> 
+#> $selection_reason
+#> [1] "algorithm_cpu_only"
+#> 
+#> $fallback
+#> [1] FALSE
+#> 
+#> $output_device
+#> [1] "cpu"
+#> 
+#> attr(,"class")
+#> [1] "cuda_stage"
+#> 
+#> attr(,"backend")
+#> [1] "base"
+#> attr(,"parameters")
+#> attr(,"parameters")$type
+#> [1] "cluster"
+#> 
+#> attr(,"parameters")$metric
+#> [1] "euclidean"
+#> 
+#> attr(,"source_device")
+#> [1] "cpu"
+#> attr(,"source_class")
+#> [1] "matrix"
+```
+
+The reversed columns above are intentional. When a model was fitted with
+feature names, prediction aligns the same unique names automatically. It
+fails clearly for missing, unexpected, or unnamed features instead of
+silently projecting values in the wrong order. If duplicated feature
+names were used for fitting, prediction requires the exact original
+order because a safe reordering would be ambiguous.
+
+Omitting `newdata` returns the stored training scores or assignments.
+Set `type = "distance"` for k-means to receive the complete
+observation-by-centre distance matrix. Both prediction methods accept
+one observation and reuse the model’s actual device by default;
+`device = "cpu"`, `"cuda"`, or `"auto"` can override that choice
+explicitly. In particular, `device = "cpu"` makes a saved CUDA-fitted
+model portable to a machine without a CUDA runtime. Stored-value
+retrieval validates the stored scores or assignments but does not
+perform computation or attach a new prediction stage; only recomputed
+predictions have prediction provenance.
 
 If a CUDA `cudatensor` must first be materialized as an R matrix,
 provenance also includes an `input_materialization` stage. This makes a
@@ -172,6 +353,9 @@ Device requests follow these rules:
 - `"auto"` uses CUDA when diagnostics report a usable device. Otherwise
   it selects CPU and records `fallback = TRUE` plus a stable reason such
   as `torch_not_installed` or `cuda_unavailable`.
+- Prediction’s `"model"` choice reuses the fitted object’s actual device
+  and records `requested_device = "inherited"` with
+  `selection_reason = "model_device"`.
 - Once CUDA has been selected, an execution error is reported as an
   error. It is not retried silently on CPU.
 
@@ -218,7 +402,11 @@ too large.
 
 [`cuda_distance()`](https://cudaverse.github.io/cudalearnr/reference/cuda_distance.md)
 intentionally returns the complete dense pairwise matrix, requiring
-about `8 * nrow(x) * nrow(y)` bytes for doubles.
+about `8 * nrow(x) * nrow(y)` bytes for doubles. Its CPU Euclidean path
+applies a common translation and global scaling before a vectorized
+calculation, then recomputes numerically risky pairs from direct,
+scale-first differences. This avoids cancellation from large squared
+norms and avoids avoidable overflow or underflow.
 
 [`cuda_knn()`](https://cudaverse.github.io/cudalearnr/reference/cuda_knn.md)
 is exact and quadratic in time, but `batch_size` bounds its resident
