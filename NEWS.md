@@ -1,3 +1,16 @@
+# cudalearnr 0.2.0
+
+- SVD, PCA, distance, exact kNN, and k-means results now expose the shared
+  stage-level provenance schema, their original device request, concrete
+  backend, effective parameters, source metadata, and aggregate compute device.
+- CUDA kNN and k-means now report their real hybrid execution: distance kernels
+  run on CUDA while deterministic neighbour ordering, assignment, and centroid
+  updates run on CPU.
+- Added a concise `cuda_svd` print method and made all algorithm print methods
+  disclose backend and aggregate compute device.
+- Explicit CUDA unavailability now uses the shared classed condition; automatic
+  CPU selection retains its structured reason.
+
 # cudalearnr 0.1.2
 
 - SVD, PCA, distance, kNN, and k-means results now preserve observation and

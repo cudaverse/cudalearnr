@@ -3,6 +3,11 @@ url: https://cudaverse.github.io/cudalearnr/
 template:
   bootstrap: 5
 
+articles:
+- title: Backend and provenance
+  contents:
+  - backend-provenance
+
 reference:
 - title: Decomposition and dimensionality reduction
   contents:
@@ -15,3 +20,6 @@ reference:
 - title: Clustering
   contents:
   - cuda_kmeans
+- title: Provenance
+  contents:
+  - cuda_provenance

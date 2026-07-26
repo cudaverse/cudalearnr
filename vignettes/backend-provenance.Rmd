@@ -1,0 +1,218 @@
+---
+title: "Backend provenance and CUDA diagnostics"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Backend provenance and CUDA diagnostics}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+`cudalearnr` uses one API on CPU and CUDA, but it does not treat a CUDA-aware
+function name as proof that every stage ran on a GPU. Version 0.2.0 records the
+device request and actual execution of every stage.
+
+This tutorial first runs entirely on the CPU. The CUDA section is optional and
+executes only when diagnostics prove that a usable device exists.
+
+## A reproducible CPU workflow
+
+Use `device = "cpu"` when you need a portable, guaranteed CPU run. This path
+does not inspect or initialize the optional CUDA runtime.
+
+```{r cpu-data}
+library(cudalearnr)
+
+x <- scale(as.matrix(iris[, 1:4]))
+rownames(x) <- paste0("flower_", seq_len(nrow(x)))
+
+decomposition <- cuda_svd(
+  x,
+  nu = 2,
+  nv = 2,
+  device = "cpu"
+)
+pca <- cuda_pca(
+  x,
+  n_components = 2,
+  device = "cpu"
+)
+distance <- cuda_distance(
+  pca$x,
+  device = "cpu"
+)
+neighbors <- cuda_knn(
+  pca$x,
+  k = 5,
+  batch_size = 32,
+  device = "cpu"
+)
+clusters <- cuda_kmeans(
+  pca$x,
+  centers = 3,
+  seed = 1,
+  device = "cpu"
+)
+```
+
+The numerical results remain ordinary R objects. Provenance is separate,
+stable metadata:
+
+```{r cpu-provenance}
+cuda_provenance(decomposition)
+cuda_provenance(pca)
+cuda_provenance(distance)
+cuda_provenance(neighbors)
+cuda_provenance(clusters)
+```
+
+`cuda_provenance()` returns one row per stage. Its columns have deliberately
+different meanings:
+
+| Column | Meaning |
+|---|---|
+| `requested_device` | What selected the stage: `"cpu"`, `"cuda"`, `"auto"`, a fixed CPU algorithm, or an inherited choice. |
+| `device` | Where that stage actually computed: `"cpu"` or `"cuda"`. |
+| `backend` | The concrete implementation, such as `base`, `stats`, or `torch`. |
+| `selection_reason` | Why the device was selected, including explicit requests, fixed CPU work, input transfers, or CUDA unavailability. |
+| `fallback` | `TRUE` only when an `"auto"` request selected CPU because CUDA was unavailable. |
+| `output_device` | Where the stage result was materialized. Returned R matrices and lists normally live on CPU even after CUDA computation. |
+
+The table has a `compute_device` attribute. It is `"cpu"` when all stages are
+CPU, `"cuda"` when all compute stages are CUDA, and `"hybrid"` when both occur:
+
+```{r aggregate-device}
+pca_provenance <- cuda_provenance(pca)
+attr(pca_provenance, "compute_device")
+```
+
+An output on CPU is not evidence of a fallback. CUDA kernels commonly return
+an R matrix on CPU. Conversely, `fallback = TRUE` records a device-selection
+decision; it is not used to hide a CUDA execution error.
+
+## Stage-by-stage backend semantics
+
+The following table describes successful CPU and explicit CUDA requests.
+
+| Function | Stage | CPU backend | CUDA backend | Output |
+|---|---|---|---|---|
+| `cuda_svd()` | `decomposition` | `base` | `torch` | CPU R list |
+| `cuda_pca()` | `preprocessing` | `stats` | `torch` | selected device |
+| `cuda_pca()` | `decomposition` | `stats` | `torch` | CPU R list |
+| `cuda_distance()` | `distance` | `base` | `torch` | CPU dense matrix |
+| `cuda_knn()` | `distance` | `base` | `torch` | CPU distance block |
+| `cuda_knn()` | `neighbor_selection` | `base` | `base` | CPU R list |
+| `cuda_kmeans()` | `initialization` | `base` | `base` | CPU |
+| `cuda_kmeans()` | `distance` | `base` | `torch` | CPU distance matrix |
+| `cuda_kmeans()` | `assignment` | `base` | `base` | CPU |
+| `cuda_kmeans()` | `center_update` | `base` | `base` | CPU R list |
+
+Thus SVD, PCA, and distance have a CUDA aggregate when explicitly run on CUDA.
+kNN and k-means are intentionally hybrid: CUDA accelerates distance
+calculation, while deterministic selection, assignments, and centre updates
+remain in R on the CPU.
+
+If a CUDA `cudatensor` must first be materialized as an R matrix, provenance
+also includes an `input_materialization` stage. This makes a device transfer
+visible instead of presenting the subsequent kernel as the whole workflow.
+
+## Runtime diagnostics and device requests
+
+Diagnostics are non-destructive: they inspect the optional torch runtime but
+never install or download it.
+
+```{r diagnostics}
+diagnostics <- cudatensr::cuda_diagnostics()
+diagnostics
+```
+
+Device requests follow these rules:
+
+- `"cpu"` is explicit and always uses the portable backend.
+- `"cuda"` is strict. If CUDA is unavailable, the call raises a
+  `cudaverse_cuda_unavailable` error; it does not fall back.
+- `"auto"` uses CUDA when diagnostics report a usable device. Otherwise it
+  selects CPU and records `fallback = TRUE` plus a stable reason such as
+  `torch_not_installed` or `cuda_unavailable`.
+- Once CUDA has been selected, an execution error is reported as an error. It
+  is not retried silently on CPU.
+
+## Optional CUDA run
+
+The same data can be used for a small CUDA smoke test. The conditional keeps
+the vignette runnable on machines without a GPU.
+
+```{r optional-cuda}
+if (isTRUE(diagnostics$cuda_available)) {
+  cuda_pca_fit <- cuda_pca(
+    x,
+    n_components = 2,
+    device = "cuda"
+  )
+  cuda_neighbors <- cuda_knn(
+    cuda_pca_fit$x,
+    k = 5,
+    batch_size = 32,
+    device = "cuda"
+  )
+
+  cuda_provenance(cuda_pca_fit)
+  cuda_provenance(cuda_neighbors)
+} else {
+  message("CUDA example skipped: ", diagnostics$reason)
+}
+```
+
+For kNN, a CUDA distance stage followed by CPU neighbour selection produces
+`compute_device = "hybrid"`. This is expected and is stronger evidence than
+checking only the legacy `$device` field.
+
+## Dense-memory boundaries
+
+`cuda_pca()` accepts a dense observation-by-feature matrix. A double matrix
+alone uses roughly `8 * nrow(x) * ncol(x)` bytes, and centring, scaling, SVD,
+and CPU/GPU copies require additional working memory. Reduce the number of
+observations or features before PCA when the dense representation is too
+large.
+
+`cuda_distance()` intentionally returns the complete dense pairwise matrix,
+requiring about `8 * nrow(x) * nrow(y)` bytes for doubles.
+
+`cuda_knn()` is exact and quadratic in time, but `batch_size` bounds its
+resident distance block to approximately
+`8 * min(batch_size, nrow(x)) * nrow(x)` bytes. Its returned distance matrix
+uses about `8 * nrow(x) * k` bytes, in addition to the integer index matrix.
+Lower `batch_size` to reduce peak memory; it does not change selected
+neighbours.
+
+## Hardware-enforced parity gate
+
+Ordinary package checks use portable CPU paths and may conditionally skip GPU
+examples. That is not accepted as CUDA coverage. The cudaverse hardware
+workflow runs on a self-hosted runner labelled `cuda`, sets
+`CUDAVERSE_REQUIRE_CUDA=true`, proves NVIDIA visibility with `nvidia-smi`, and
+requires both `torch::cuda_is_available()` and a positive CUDA device count.
+It then compares the public CPU and CUDA paths and verifies their provenance.
+
+Projects reusing the same convention can turn the environment marker into a
+hard local gate:
+
+```{r hardware-gate}
+require_cuda <- identical(
+  tolower(Sys.getenv("CUDAVERSE_REQUIRE_CUDA", unset = "false")),
+  "true"
+)
+if (require_cuda && !isTRUE(diagnostics$cuda_available)) {
+  stop("CUDA hardware is required, but no usable device was detected.")
+}
+```
+
+The package-level CUDA workflow runs manually, or automatically when the
+repository variable `CUDAVERSE_NVIDIA_CI` is set to `enabled`. A missing or
+broken GPU on that required job is a failure, never a successful skip.

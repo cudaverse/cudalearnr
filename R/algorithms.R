@@ -17,14 +17,120 @@
 }
 
 .learn_device <- function(device) {
-  device <- match.arg(device, c("auto", "cuda", "cpu"))
-  if (device == "auto") {
-    device <- if (cudatensr::cuda_available()) "cuda" else "cpu"
+  cudatensr::cuda_select_device(
+    match.arg(device, c("auto", "cuda", "cpu"))
+  )
+}
+
+.learn_stage <- function(selection, backend, output_device = selection$device,
+                         reason = selection$selection_reason) {
+  cudatensr::cuda_stage(
+    requested_device = selection$requested_device,
+    device = selection$device,
+    backend = backend,
+    selection_reason = reason,
+    fallback = selection$fallback,
+    output_device = output_device
+  )
+}
+
+.learn_cpu_stage <- function(backend = "base",
+                             reason = "algorithm_cpu_only") {
+  cudatensr::cuda_stage(
+    requested_device = "fixed-cpu",
+    device = "cpu",
+    backend = backend,
+    selection_reason = reason,
+    fallback = FALSE,
+    output_device = "cpu"
+  )
+}
+
+.learn_input_stage <- function(x) {
+  if (!inherits(x, "cudatensor") || !identical(x$device, "cuda")) {
+    return(NULL)
   }
-  if (device == "cuda" && !cudatensr::cuda_available()) {
-    stop("CUDA is unavailable; use `device = \"cpu\"`.", call. = FALSE)
+  cudatensr::cuda_stage(
+    requested_device = "inherited",
+    device = "cpu",
+    backend = "base",
+    selection_reason = "input_transfer",
+    fallback = FALSE,
+    output_device = "cpu"
+  )
+}
+
+.learn_add_stage <- function(stages, name, stage) {
+  if (!is.null(stage)) {
+    stages[[name]] <- stage
   }
-  device
+  stages
+}
+
+.with_learning_provenance <- function(x, stages, requested_device = NULL,
+                                      backend = NULL, parameters = NULL,
+                                      source_device = NULL,
+                                      source_class = NULL) {
+  provenance <- cudatensr::cuda_provenance(stages)
+  schema <- attr(provenance, "schema", exact = TRUE)
+  compute_device <- attr(provenance, "compute_device", exact = TRUE)
+  stages <- attr(provenance, "compute_stages", exact = TRUE)
+  if (is.list(x) && is.null(dim(x))) {
+    x$provenance_schema <- schema
+    if (!is.null(requested_device)) {
+      x$requested_device <- requested_device
+    }
+    x$compute_device <- compute_device
+    x$compute_stages <- stages
+    if (!is.null(backend)) {
+      x$backend <- backend
+    }
+    if (!is.null(parameters)) {
+      x$parameters <- parameters
+    }
+    if (!is.null(source_device)) {
+      x$source_device <- source_device
+    }
+    if (!is.null(source_class)) {
+      x$source_class <- source_class
+    }
+    return(x)
+  }
+  attr(x, "provenance_schema") <- schema
+  if (!is.null(requested_device)) {
+    attr(x, "requested_device") <- requested_device
+  }
+  attr(x, "compute_device") <- compute_device
+  attr(x, "compute_stages") <- stages
+  if (!is.null(backend)) {
+    attr(x, "backend") <- backend
+  }
+  if (!is.null(parameters)) {
+    attr(x, "parameters") <- parameters
+  }
+  if (!is.null(source_device)) {
+    attr(x, "source_device") <- source_device
+  }
+  if (!is.null(source_class)) {
+    attr(x, "source_class") <- source_class
+  }
+  x
+}
+
+.learn_source_device <- function(x) {
+  if (inherits(x, "cudatensor")) x$device else "cpu"
+}
+
+#' Inspect actual compute provenance
+#'
+#' This is the shared [cudatensr::cuda_provenance()] inspector, re-exposed for
+#' numerical-learning results.
+#'
+#' @param x A cudaverse result or named list of compute stages.
+#' @return A `cuda_provenance` data frame.
+#' @export
+cuda_provenance <- function(x) {
+  cudatensr::cuda_provenance(x)
 }
 
 .learn_flag <- function(value, argument) {
@@ -106,10 +212,14 @@
 cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
                      nv = min(nrow(x), ncol(x)),
                      device = c("auto", "cuda", "cpu")) {
+  source_device <- .learn_source_device(x)
+  source_class <- class(x)[[1L]]
+  input_stage <- .learn_input_stage(x)
   x <- .learn_matrix(x)
   observation_names <- rownames(x)
   feature_names <- colnames(x)
-  device <- .learn_device(device)
+  selection <- .learn_device(device)
+  device <- selection$device
   rank <- min(dim(x))
   for (value in list(nu = nu, nv = nv)) {
     if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
@@ -139,7 +249,7 @@ cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
   names(singular_values) <- component_names
   dimnames(u) <- list(observation_names, utils::head(component_names, nu))
   dimnames(v) <- list(feature_names, utils::head(component_names, nv))
-  structure(
+  output <- structure(
     list(
       d = singular_values,
       u = u,
@@ -147,6 +257,21 @@ cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
       device = device
     ),
     class = "cuda_svd"
+  )
+  stages <- .learn_add_stage(list(), "input_materialization", input_stage)
+  stages$decomposition <- .learn_stage(
+    selection,
+    backend = if (identical(device, "cuda")) "torch" else "base",
+    output_device = "cpu"
+  )
+  .with_learning_provenance(
+    output,
+    stages,
+    requested_device = selection$requested_device,
+    backend = if (identical(device, "cuda")) "torch" else "base",
+    parameters = list(nu = nu, nv = nv),
+    source_device = source_device,
+    source_class = source_class
   )
 }
 
@@ -167,12 +292,16 @@ cuda_svd <- function(x, nu = min(nrow(x), ncol(x)),
 #' fit
 cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
                      device = c("auto", "cuda", "cpu")) {
+  source_device <- .learn_source_device(x)
+  source_class <- class(x)[[1L]]
+  input_stage <- .learn_input_stage(x)
   x <- .learn_matrix(as.matrix(x), min_cols = 2L)
   observation_names <- rownames(x)
   feature_names <- colnames(x)
   center <- .learn_flag(center, "center")
   scale. <- .learn_flag(scale., "scale.")
-  device <- .learn_device(device)
+  selection <- .learn_device(device)
+  device <- selection$device
   max_components <- min(nrow(x) - 1L, ncol(x))
   if (!is.numeric(n_components) || length(n_components) != 1L ||
       is.na(n_components) || n_components < 1 ||
@@ -191,7 +320,7 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
   if (device == "cpu") {
     fit <- stats::prcomp(x, center = center, scale. = scale.,
                          rank. = n_components)
-    return(.named_pca_result(
+    output <- .named_pca_result(
       list(
         sdev = fit$sdev[seq_len(n_components)],
         rotation = fit$rotation[, seq_len(n_components), drop = FALSE],
@@ -202,50 +331,84 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
       ),
       observation_names = observation_names,
       feature_names = feature_names
-    ))
-  }
-
-  tensor <- .torch_matrix(x)
-  centre_values <- if (center) {
-    tensor$mean(dim = 1L, keepdim = TRUE)
-  } else {
-    torch::torch_zeros(
-      c(1L, ncol(x)),
-      dtype = torch::torch_float64(),
-      device = "cuda"
     )
-  }
-  transformed <- tensor - centre_values
-  scale_values <- if (scale.) {
-    transformed$std(dim = 1L, unbiased = TRUE, keepdim = TRUE)
   } else {
-    torch::torch_ones(
-      c(1L, ncol(x)),
-      dtype = torch::torch_float64(),
-      device = "cuda"
-    )
-  }
-  transformed <- transformed / scale_values
-  decomposition <- torch::torch_svd(transformed, some = TRUE)
-  components <- seq_len(n_components)
-  scores <- decomposition[[1]][, components, drop = FALSE] *
-    decomposition[[2]][components]
+    tensor <- .torch_matrix(x)
+    centre_values <- if (center) {
+      tensor$mean(dim = 1L, keepdim = TRUE)
+    } else {
+      torch::torch_zeros(
+        c(1L, ncol(x)),
+        dtype = torch::torch_float64(),
+        device = "cuda"
+      )
+    }
+    transformed <- tensor - centre_values
+    scale_values <- if (scale.) {
+      transformed$std(dim = 1L, unbiased = TRUE, keepdim = TRUE)
+    } else {
+      torch::torch_ones(
+        c(1L, ncol(x)),
+        dtype = torch::torch_float64(),
+        device = "cuda"
+      )
+    }
+    transformed <- transformed / scale_values
+    decomposition <- torch::torch_svd(transformed, some = TRUE)
+    components <- seq_len(n_components)
+    scores <- decomposition[[1]][, components, drop = FALSE] *
+      decomposition[[2]][components]
 
-  .named_pca_result(
-    list(
-      sdev = as.vector(.torch_array(
-        decomposition[[2]][components] / sqrt(nrow(x) - 1)
-      )),
-      rotation = .torch_array(
-        decomposition[[3]][, components, drop = FALSE]
+    output <- .named_pca_result(
+      list(
+        sdev = as.vector(.torch_array(
+          decomposition[[2]][components] / sqrt(nrow(x) - 1)
+        )),
+        rotation = .torch_array(
+          decomposition[[3]][, components, drop = FALSE]
+        ),
+        x = .torch_array(scores),
+        center = if (center) {
+          as.vector(.torch_array(centre_values))
+        } else {
+          FALSE
+        },
+        scale = if (scale.) {
+          as.vector(.torch_array(scale_values))
+        } else {
+          FALSE
+        },
+        device = "cuda"
       ),
-      x = .torch_array(scores),
-      center = if (center) as.vector(.torch_array(centre_values)) else FALSE,
-      scale = if (scale.) as.vector(.torch_array(scale_values)) else FALSE,
-      device = "cuda"
+      observation_names = observation_names,
+      feature_names = feature_names
+    )
+  }
+
+  stages <- .learn_add_stage(list(), "input_materialization", input_stage)
+  backend <- if (identical(device, "cuda")) "torch" else "stats"
+  stages$preprocessing <- .learn_stage(
+    selection,
+    backend = backend,
+    output_device = device
+  )
+  stages$decomposition <- .learn_stage(
+    selection,
+    backend = backend,
+    output_device = "cpu"
+  )
+  .with_learning_provenance(
+    output,
+    stages,
+    requested_device = selection$requested_device,
+    backend = backend,
+    parameters = list(
+      n_components = n_components,
+      center = center,
+      scale = scale.
     ),
-    observation_names = observation_names,
-    feature_names = feature_names
+    source_device = source_device,
+    source_class = source_class
   )
 }
 
@@ -279,6 +442,10 @@ cuda_pca <- function(x, n_components = 2L, center = TRUE, scale. = FALSE,
 cuda_distance <- function(x, y = NULL,
                           metric = c("euclidean", "cosine"),
                           device = c("auto", "cuda", "cpu")) {
+  source_device <- .learn_source_device(x)
+  source_class <- class(x)[[1L]]
+  input_x_stage <- .learn_input_stage(x)
+  input_y_stage <- if (is.null(y)) NULL else .learn_input_stage(y)
   x <- .learn_matrix(x)
   x_names <- rownames(x)
   self <- is.null(y)
@@ -297,7 +464,8 @@ cuda_distance <- function(x, y = NULL,
     x_unit <- .cosine_unit_rows(x, "x")
     y_unit <- if (self) x_unit else .cosine_unit_rows(y, "y")
   }
-  device <- .learn_device(device)
+  selection <- .learn_device(device)
+  device <- selection$device
 
   if (device == "cuda") {
     x_gpu <- .torch_matrix(if (metric == "cosine") x_unit else x)
@@ -326,7 +494,22 @@ cuda_distance <- function(x, y = NULL,
     dimnames(distance) <- list(x_names, y_names)
   }
   attr(distance, "device") <- device
-  distance
+  stages <- .learn_add_stage(list(), "input_x_materialization", input_x_stage)
+  stages <- .learn_add_stage(stages, "input_y_materialization", input_y_stage)
+  stages$distance <- .learn_stage(
+    selection,
+    backend = if (identical(device, "cuda")) "torch" else "base",
+    output_device = "cpu"
+  )
+  .with_learning_provenance(
+    distance,
+    stages,
+    requested_device = selection$requested_device,
+    backend = if (identical(device, "cuda")) "torch" else "base",
+    parameters = list(metric = metric),
+    source_device = source_device,
+    source_class = source_class
+  )
 }
 
 .knn_batch_size <- function(batch_size, n) {
@@ -437,6 +620,9 @@ cuda_distance <- function(x, y = NULL,
 cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
                      device = c("auto", "cuda", "cpu"),
                      batch_size = 256L) {
+  source_device <- .learn_source_device(x)
+  source_class <- class(x)[[1L]]
+  input_stage <- .learn_input_stage(x)
   x <- .learn_matrix(x)
   observation_names <- rownames(x)
   integer_k <- suppressWarnings(as.integer(k))
@@ -452,7 +638,8 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
   } else {
     NULL
   }
-  device <- .learn_device(device)
+  selection <- .learn_device(device)
+  device <- selection$device
   batch_size <- .knn_batch_size(batch_size, nrow(x))
   state <- .knn_distance_state(x, metric, device, cosine_values)
   reference_index <- seq_len(nrow(x))
@@ -507,7 +694,7 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
     )
   }
 
-  structure(
+  output <- structure(
     list(
       index = index,
       distance = neighbour_distance,
@@ -515,6 +702,26 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
       device = device
     ),
     class = "cuda_knn"
+  )
+  stages <- .learn_add_stage(list(), "input_materialization", input_stage)
+  stages$distance <- .learn_stage(
+    selection,
+    backend = if (identical(device, "cuda")) "torch" else "base",
+    output_device = "cpu"
+  )
+  stages$neighbor_selection <- .learn_cpu_stage()
+  .with_learning_provenance(
+    output,
+    stages,
+    requested_device = selection$requested_device,
+    backend = if (identical(device, "cuda")) "torch+base" else "base",
+    parameters = list(
+      k = integer_k,
+      metric = metric,
+      batch_size = batch_size
+    ),
+    source_device = source_device,
+    source_class = source_class
   )
 }
 
@@ -538,10 +745,14 @@ cuda_knn <- function(x, k = 15L, metric = c("euclidean", "cosine"),
 cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
                         seed = NULL,
                         device = c("auto", "cuda", "cpu")) {
+  source_device <- .learn_source_device(x)
+  source_class <- class(x)[[1L]]
+  input_stage <- .learn_input_stage(x)
   x <- .learn_matrix(x)
   observation_names <- rownames(x)
   feature_names <- colnames(x)
-  device <- .learn_device(device)
+  selection <- .learn_device(device)
+  device <- selection$device
   if (!is.numeric(iter.max) || length(iter.max) != 1L ||
       is.na(iter.max) || iter.max < 1 || iter.max != as.integer(iter.max)) {
     stop("`iter.max` must be a positive whole number.", call. = FALSE)
@@ -607,7 +818,7 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
     names(withinss) <- cluster_names
   }
 
-  structure(
+  output <- structure(
     list(
       cluster = cluster,
       centers = centre_matrix,
@@ -619,13 +830,52 @@ cuda_kmeans <- function(x, centers, iter.max = 100L, tolerance = 1e-6,
     ),
     class = "cuda_kmeans"
   )
+  stages <- .learn_add_stage(list(), "input_materialization", input_stage)
+  stages$initialization <- .learn_cpu_stage()
+  stages$distance <- .learn_stage(
+    selection,
+    backend = if (identical(device, "cuda")) "torch" else "base",
+    output_device = "cpu"
+  )
+  stages$assignment <- .learn_cpu_stage()
+  stages$center_update <- .learn_cpu_stage()
+  .with_learning_provenance(
+    output,
+    stages,
+    requested_device = selection$requested_device,
+    backend = if (identical(device, "cuda")) "torch+base" else "base",
+    parameters = list(
+      centers = if (length(centers) == 1L) {
+        as.integer(centers)
+      } else {
+        "matrix"
+      },
+      iter.max = as.integer(iter.max),
+      tolerance = tolerance,
+      seed = seed
+    ),
+    source_device = source_device,
+    source_class = source_class
+  )
+}
+
+#' @export
+print.cuda_svd <- function(x, ...) {
+  cat(sprintf(
+    "<cuda_svd rank=%s device=%s compute=%s backend=%s>\n",
+    length(x$d),
+    x$device,
+    x$compute_device,
+    x$backend
+  ))
+  invisible(x)
 }
 
 #' @export
 print.cuda_pca <- function(x, ...) {
   cat(sprintf(
-    "<cuda_pca components=%s device=%s>\n",
-    ncol(x$rotation), x$device
+    "<cuda_pca components=%s device=%s compute=%s backend=%s>\n",
+    ncol(x$rotation), x$device, x$compute_device, x$backend
   ))
   print(x$rotation, ...)
   invisible(x)
@@ -634,8 +884,12 @@ print.cuda_pca <- function(x, ...) {
 #' @export
 print.cuda_knn <- function(x, ...) {
   cat(sprintf(
-    "<cuda_knn observations=%s k=%s metric=%s device=%s>\n",
-    nrow(x$index), ncol(x$index), x$metric, x$device
+    paste0(
+      "<cuda_knn observations=%s k=%s metric=%s ",
+      "distance_device=%s compute=%s backend=%s>\n"
+    ),
+    nrow(x$index), ncol(x$index), x$metric, x$device,
+    x$compute_device, x$backend
   ))
   invisible(x)
 }
@@ -643,8 +897,12 @@ print.cuda_knn <- function(x, ...) {
 #' @export
 print.cuda_kmeans <- function(x, ...) {
   cat(sprintf(
-    "<cuda_kmeans clusters=%s iterations=%s converged=%s device=%s>\n",
-    nrow(x$centers), x$iter, x$converged, x$device
+    paste0(
+      "<cuda_kmeans clusters=%s iterations=%s converged=%s ",
+      "distance_device=%s compute=%s backend=%s>\n"
+    ),
+    nrow(x$centers), x$iter, x$converged, x$device,
+    x$compute_device, x$backend
   ))
   print(x$centers, ...)
   invisible(x)

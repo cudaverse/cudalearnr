@@ -114,7 +114,23 @@ test_that("cosine normalization is stable across extreme finite scales", {
 test_that("k-nearest neighbours exclude each observation", {
   fit <- cuda_knn(test_matrix(), k = 2, device = "cpu")
 
-  expect_named(fit, c("index", "distance", "metric", "device"))
+  expect_named(
+    fit,
+    c(
+      "index",
+      "distance",
+      "metric",
+      "device",
+      "provenance_schema",
+      "requested_device",
+      "compute_device",
+      "compute_stages",
+      "backend",
+      "parameters",
+      "source_device",
+      "source_class"
+    )
+  )
   expect_identical(dim(fit$index), c(6L, 2L))
   expect_false(any(fit$index == row(fit$index)))
   expect_true(all(fit$distance >= 0))
