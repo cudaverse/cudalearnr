@@ -13,6 +13,7 @@ reference:
   contents:
   - cuda_svd
   - cuda_pca
+  - predict.cuda_pca
 - title: Distances and nearest neighbours
   contents:
   - cuda_distance
@@ -20,6 +21,7 @@ reference:
 - title: Clustering
   contents:
   - cuda_kmeans
+  - predict.cuda_kmeans
 - title: Provenance
   contents:
   - cuda_provenance
