@@ -1,5 +1,11 @@
 # cudalearnr
 
+> **Archived:** This package has been incorporated into
+> [`cudaverse`](https://github.com/cudaverse/cudaverse). Install and load
+> `cudaverse`, then continue using the same numerical algorithm functions. This
+> repository remains available as development history and receives no new
+> features or releases.
+
 `cudalearnr` is the reusable numerical algorithm layer of the **cudaverse**.
 It provides GPU-aware implementations with explicit device reporting and
 portable CPU fallbacks.
